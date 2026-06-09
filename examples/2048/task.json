@@ -1,0 +1,10 @@
+{
+    "_comment": "2048 AI - 使用回调函数实时决策",
+    "GameLoop": {
+        "desc": "AI主循环",
+        "action": "callback",
+        "params": { "name": "play_2048" },
+        "next": ["GameLoop"],
+        "humanDelay": "think"
+    }
+}

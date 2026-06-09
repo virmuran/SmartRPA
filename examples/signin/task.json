@@ -1,0 +1,43 @@
+{
+    "_comment": "网站每日签到自动化",
+    "_note": "截取签到按钮、关闭广告按钮、登录按钮的模板图片，放到 templates/ 目录",
+    "_template_dir": "examples/signin/templates/",
+
+    "CheckLogin": {
+        "desc": "先检查是否已登录（找用户名显示）",
+        "action": "find",
+        "params": { "template": "user_avatar", "threshold": 0.8 },
+        "next": ["DoSignin"],
+        "onErrorNext": ["DoLogin"]
+    },
+
+    "DoLogin": {
+        "desc": "点击登录按钮",
+        "action": "click",
+        "params": { "template": "login_btn", "threshold": 0.8 },
+        "next": ["WaitLogin"],
+        "humanDelay": "transition"
+    },
+
+    "WaitLogin": {
+        "desc": "等待登录完成",
+        "action": "wait",
+        "params": { "seconds": 3 },
+        "next": ["DoSignin"]
+    },
+
+    "DoSignin": {
+        "desc": "点击签到按钮",
+        "action": "click",
+        "params": { "template": "signin_btn", "threshold": 0.8 },
+        "next": ["WaitResult"],
+        "humanDelay": "click"
+    },
+
+    "WaitResult": {
+        "desc": "等待签到结果弹窗 → 自动关闭",
+        "action": "wait",
+        "params": { "seconds": 2 },
+        "next": null
+    }
+}
