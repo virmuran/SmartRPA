@@ -2,7 +2,7 @@
 import json
 import time
 import logging
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any, Tuple
 from pathlib import Path
 
 from .controller import Controller
@@ -21,6 +21,8 @@ class TaskEngine:
     2. 状态机驱动任务执行
     3. 每个步骤前检测并处理弹窗
     4. 真人化所有操作
+    5. 窗口锚定（窗口移动后自动补偿偏移）
+    6. 失败自动重试（可配次数和间隔）
     """
 
     def __init__(self,
@@ -31,10 +33,15 @@ class TaskEngine:
         self.vision = vision or Vision()
         self.popup = popup
 
-        self._tasks: Dict[str, dict] = {}        # 任务定义
-        self._callbacks: Dict[str, Callable] = {} # 回调函数
+        self._tasks: Dict[str, dict] = {}
+        self._callbacks: Dict[str, Callable] = {}
         self._running = False
         self._stats = {"steps": 0, "errors": 0, "popups_handled": 0}
+
+        # 窗口锚定
+        self._anchor_offset: Tuple[int, int] = (0, 0)
+        self._anchor_template: Optional[str] = None
+        self._anchor_threshold: float = 0.8
 
     # ========== 配置加载 ==========
 
@@ -50,7 +57,6 @@ class TaskEngine:
     def _load_file(self, filepath: Path):
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Only load dict entries (skip _comment, _game etc. which are strings)
         tasks = {k: v for k, v in data.items() if isinstance(v, dict)}
         self._tasks.update(tasks)
         logger.info(f"Loaded {len(tasks)} task definitions")
@@ -58,6 +64,57 @@ class TaskEngine:
     def on(self, name: str, func: Callable):
         """注册回调函数"""
         self._callbacks[name] = func
+
+    # ========== 窗口锚定 ==========
+
+    def configure_anchor(self, template: str, threshold: float = 0.8):
+        """
+        配置窗口锚定模板。
+
+        Args:
+            template: 用于定位窗口的模板图片（如窗口标题栏）
+            threshold: 匹配阈值
+        """
+        self._anchor_template = template
+        self._anchor_threshold = threshold
+
+    def _calibrate_anchor(self) -> Tuple[int, int]:
+        """
+        执行锚定校准，返回当前偏移量 (dx, dy)。
+
+        如果上一次校准的偏移量与当前相差超过阈值，
+        说明窗口移动了，重新计算偏移。
+
+        Returns:
+            (dx, dy) 当前窗口相对于初始位置的偏移
+        """
+        if not self._anchor_template:
+            return (0, 0)
+
+        screenshot = self.controller.screenshot()
+        result = self.vision.find(screenshot, self._anchor_template,
+                                  threshold=self._anchor_threshold)
+        if result.found:
+            # 假设锚定模板在参考截图中位于 (0, 0)
+            return (result.x, result.y)
+
+        logger.warning(f"锚定模板 '{self._anchor_template}' 未找到，偏移不生效")
+        return (0, 0)
+
+    def _apply_anchor_to_roi(self, roi: Optional[Tuple[int, int, int, int]]) -> Optional[Tuple[int, int, int, int]]:
+        """
+        将锚定偏移应用到 ROI 区域。
+
+        Args:
+            roi: 原始 ROI (x, y, w, h)
+
+        Returns:
+            偏移后的 ROI
+        """
+        if roi is None or self._anchor_offset == (0, 0):
+            return roi
+        dx, dy = self._anchor_offset
+        return (roi[0] - dx, roi[1] - dy, roi[2], roi[3])
 
     # ========== 任务执行 ==========
 
@@ -72,6 +129,12 @@ class TaskEngine:
         self._running = True
         current = entry
         step_count = 0
+
+        # 首次校准锚定
+        if self._anchor_template:
+            self._anchor_offset = self._calibrate_anchor()
+            if self._anchor_offset != (0, 0):
+                logger.info(f"窗口锚定偏移: {self._anchor_offset}")
 
         logger.info(f"开始执行: {entry}")
 
@@ -88,22 +151,26 @@ class TaskEngine:
             step_count += 1
             self._stats["steps"] += 1
 
-            # ── 步骤1：截图 ──
+            # 定期重新校准锚定（每 10 步一次）
+            if self._anchor_template and step_count % 10 == 0:
+                self._anchor_offset = self._calibrate_anchor()
+
+            # 截图
             screenshot = self.controller.screenshot()
 
-            # ── 步骤2：弹窗检测（每个步骤前） ──
+            # 弹窗检测（每个步骤前）
             if self.popup and self.popup.enabled:
                 if self.popup.handle(screenshot):
                     self._stats["popups_handled"] += 1
                     logger.info("[弹窗] 已处理")
                     screenshot = self.controller.screenshot()
 
-            # ── 步骤3：执行当前任务 ──
+            # 执行当前任务
             logger.info(f"[{step_count}] {current}: {task.get('desc', '')}")
 
             result = self._execute_step(screenshot, task)
 
-            # ── 步骤4：根据结果跳转 ──
+            # 根据结果跳转
             if result:
                 next_tasks = task.get("next", [])
             else:
@@ -111,7 +178,7 @@ class TaskEngine:
                 self._stats["errors"] += 1
                 logger.warning(f"  └ 失败，尝试: {next_tasks}")
 
-            # 随机延迟（模拟真人）
+            # 随机延迟
             delay_type = task.get("humanDelay", "transition")
             self.controller.random_delay(delay_type)
 
@@ -135,38 +202,75 @@ class TaskEngine:
     def stop(self):
         self._running = False
 
-    # ========== 步骤执行 ==========
+    # ========== 步骤执行（含重试机制） ==========
 
     def _execute_step(self, screenshot, task: dict) -> bool:
-        """执行单个任务步骤，返回是否成功"""
+        """执行单个任务步骤，支持自动重试"""
         action = task.get("action", "click")
         params = task.get("params", {})
 
-        try:
-            if action == "click":
-                return self._do_click(screenshot, params)
-            elif action == "press":
-                return self._do_press(params)
-            elif action == "type":
-                return self._do_type(params)
-            elif action == "wait":
-                return self._do_wait(params)
-            elif action == "wait_until":
-                return self._do_wait_until(params)
-            elif action == "swipe":
-                return self._do_swipe(params)
-            elif action == "callback":
-                return self._do_callback(params)
-            elif action == "find":
-                return self._do_find(screenshot, params)
-            elif action == "if":
-                return self._do_if(screenshot, params)
-            else:
-                logger.error(f"未知动作: {action}")
-                return False
-        except Exception as e:
-            logger.error(f"执行异常: {e}")
-            return False
+        # 应用锚定偏移到 params 中的 ROI
+        if "roi" in params:
+            params = dict(params)
+            params["roi"] = self._apply_anchor_to_roi(params["roi"])
+
+        # 读取重试配置
+        retry_cfg = task.get("retry", {})
+        retry_count = retry_cfg.get("count", 0) if isinstance(retry_cfg, dict) else 0
+        retry_interval = retry_cfg.get("interval", 1.0) if isinstance(retry_cfg, dict) else 1.0
+
+        max_attempts = retry_count + 1
+
+        for attempt in range(max_attempts):
+            try:
+                if action == "click":
+                    success = self._do_click(screenshot, params)
+                elif action == "press":
+                    success = self._do_press(params)
+                elif action == "type":
+                    success = self._do_type(params)
+                elif action == "wait":
+                    success = self._do_wait(params)
+                elif action == "wait_until":
+                    success = self._do_wait_until(params)
+                elif action == "swipe":
+                    success = self._do_swipe(params)
+                elif action == "callback":
+                    success = self._do_callback(params)
+                elif action == "find":
+                    success = self._do_find(screenshot, params)
+                elif action == "if":
+                    success = self._do_if(screenshot, params)
+                else:
+                    logger.error(f"未知动作: {action}")
+                    success = False
+
+                if success:
+                    return True
+
+                # 失败且还有重试次数
+                if attempt < max_attempts - 1:
+                    logger.info(f"  └ 第{attempt+1}次失败，{retry_interval}s后重试 (共{retry_count}次)")
+                    # 重试前重新截图
+                    time.sleep(retry_interval)
+                    screenshot = self.controller.screenshot()
+                    # 重试前处理弹窗
+                    if self.popup and self.popup.enabled:
+                        self.popup.handle(screenshot)
+                        screenshot = self.controller.screenshot()
+                else:
+                    logger.warning(f"  └ 已重试{retry_count}次，仍失败")
+                    return False
+
+            except Exception as e:
+                logger.error(f"执行异常: {e}")
+                if attempt < max_attempts - 1:
+                    time.sleep(retry_interval)
+                    screenshot = self.controller.screenshot()
+                else:
+                    return False
+
+        return False
 
     def _do_click(self, screenshot, params: dict) -> bool:
         """点击操作 - 核心：通过模板匹配找到目标并点击"""
@@ -174,18 +278,20 @@ class TaskEngine:
         threshold = params.get("threshold", 0.8)
         roi = params.get("roi")
 
+        # 应用锚定偏移到坐标参数
+        dx, dy = self._anchor_offset
+
         if template:
             result = self.vision.find(screenshot, template, threshold, roi)
             if result.found:
-                self.controller.click(result.center[0], result.center[1])
+                self.controller.click(result.center[0] - dx, result.center[1] - dy)
                 return True
             else:
                 logger.warning(f"  └ 未找到: {template} (阈值={threshold})")
                 return False
 
-        # 没有template=直接点坐标
-        x = params.get("x", 0)
-        y = params.get("y", 0)
+        x = params.get("x", 0) - dx
+        y = params.get("y", 0) - dy
         self.controller.click(x, y)
         return True
 
@@ -212,14 +318,13 @@ class TaskEngine:
         """智能等待：轮询检测模板，出现后立即继续"""
         template = params.get("template", "")
         threshold = params.get("threshold", 0.8)
-        timeout = params.get("timeout", 60)  # 最大等待秒数
-        interval = params.get("interval", 1)  # 检测间隔
+        timeout = params.get("timeout", 60)
+        interval = params.get("interval", 1)
 
         logger.info(f"等待出现: {template} (超时={timeout}s)")
         start = time.time()
         while time.time() - start < timeout:
             screenshot = self.controller.screenshot()
-            # 先处理弹窗
             if self.popup:
                 self.popup.handle(screenshot)
             result = self.vision.find(screenshot, template, threshold)
@@ -232,8 +337,11 @@ class TaskEngine:
 
     def _do_swipe(self, params: dict) -> bool:
         """滑动"""
-        x1, y1 = params.get("from", (0, 0))
-        x2, y2 = params.get("to", (0, 0))
+        dx, dy = self._anchor_offset
+        x1 = params.get("from", (0, 0))[0] - dx
+        y1 = params.get("from", (0, 0))[1] - dy
+        x2 = params.get("to", (0, 0))[0] - dx
+        y2 = params.get("to", (0, 0))[1] - dy
         self.controller.drag(x1, y1, x2, y2)
         return True
 

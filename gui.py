@@ -1,5 +1,32 @@
-"""SmartRPA GUI - MAA风格界面 (PySide6)"""
-import sys, os, json, glob, time as _time
+"""SmartRPA GUI — 视觉驱动的智能桌面自动化程序 (2026 Design)"""
+#
+# ═══════════════════════════════════════════════════════════════
+#  字体/字号 快速定位指南
+# ═══════════════════════════════════════════════════════════════
+#  搜索关键词        | 位置                      | 修改什么
+#  ─────────────────┼──────────────────────────┼──────────────────
+#  自定义字体族       | build_base_qss()          | 全局字体 (line ~118)
+#  btn_primary       | btn_primary()              | 主按钮 13px/600w
+#  btn_danger        | btn_danger()               | 危险按钮 13px/600w
+#  btn_ghost         | btn_ghost()                | 幽灵按钮 12px/500w
+#  标签/标题          | status_pill / section_header | 状态标签/分区标题
+#  page_title函数    | page_title()               | 页面内大标题 24px/700w
+#  section_title     | section_title()             | 配置字段标签
+#  section_desc      | section_desc()              | 描述文字
+#  NavButton         | NavButton._update_style()   | 顶部Tab导航 13px
+#  logo字体           | _build() 顶部导航           | Logo 15px/800w
+#  状态文字           | state_lbl                  | ●就绪 / ●运行中
+#  版本号             | _build() 顶部导航            | v0.1.0 11px
+#  运行/停止按钮      | _update_run_btn_style()     | 全宽切换按钮 14px
+#  步骤项             | _steps 字典 setStyleSheet   | 步骤列表 13px
+#  日志区字体         | self.log.setFont()          | 等宽日志字体 10px
+#  编辑器代码字体     | self.ed_list.setFont()      | 步骤编辑列表 10px
+#  关于页大标题       | _about_content()            | 品牌名 48px
+#  关于页副标题       | _about_content()            | 描述 15px
+#  全局 QFont         | 文件末尾 app.setFont()      | 全局后备字体 10px
+# ═══════════════════════════════════════════════════════════════
+#
+import sys, os, json, datetime
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -7,67 +34,395 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QCheckBox, QComboBox, QFileDialog,
-    QTextEdit, QProgressBar, QStackedWidget, QTabBar,
-    QFrame, QSplitter, QScrollArea, QSizePolicy, QDialog,
-    QRubberBand, QInputDialog, QSpinBox
+    QTextEdit, QProgressBar,
+    QFrame, QSplitter, QScrollArea, QDialog,
+    QInputDialog, QSpinBox, QStatusBar, QSizePolicy,
+    QStackedWidget, QGraphicsDropShadowEffect
 )
-from PySide6.QtCore import Qt, QThread, Signal, QRect, QPoint
-from PySide6.QtGui import QFont, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt, QThread, Signal, QRect, QTimer, QSettings
+from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient
 
 from smartrpa import Controller, Vision, TaskEngine, PopupHandler
 from callback_2048 import callback_2048
 
 
-# ── Colors (Light theme) ──
+# ═══════════════════════════════════════════════
+#  2026 Design System — Theme Tokens
+# ═══════════════════════════════════════════════
 
-C_BG      = "#f5f5f5"
-C_DARK    = "#ffffff"
-C_CARD    = "#ffffff"
-C_ACCENT  = "#1976D2"
-C_ACCENT2 = "#1565C0"
-C_TEXT    = "#212121"
-C_TEXT2   = "#757575"
-C_SUCCESS = "#388E3C"
-C_WARN    = "#F57C00"
-C_ERROR   = "#D32F2F"
-C_BORDER  = "#e0e0e0"
-C_START   = "#43A047"
+class Theme:
+    """Dual-theme design tokens — call Theme.apply('light'|'dark') to switch."""
 
-STYLE = f"""
-* {{ font-family:"Microsoft YaHei",sans-serif; font-size:13px; }}
-QMainWindow {{ background:{C_BG}; }}
-QTabBar::tab {{ 
-    background:{C_DARK}; color:{C_TEXT2}; border:none; padding:10px 22px; 
-    font-size:13px; min-width:80px;
+    # Shared (invariant across themes)
+    SP_XS   = 4
+    SP_SM   = 8
+    SP_MD   = 12
+    SP_LG   = 16
+    SP_XL   = 24
+    SP_2XL  = 32
+    SP_3XL  = 48
+    R_SM    = 8
+    R_MD    = 12
+    R_LG    = 16
+    R_XL    = 20
+    ACCENT     = "#7c6ff7"
+    ACCENT2    = "#a78bfa"
+    GREEN      = "#34d399"
+    ORANGE     = "#fbbf24"
+    RED        = "#f87171"
+    BLUE       = "#60a5fa"
+
+    def __init__(self):
+        self.mode = "light"
+
+    # ── Theme-dependent properties ──
+
+    @property
+    def BG(self):          return "#f4f4f8" if self.mode == "light" else "#0c0c12"
+    @property
+    def SURFACE(self):     return "#e8e9ee" if self.mode == "light" else "#14141e"
+    @property
+    def CARD(self):        return "#ffffff"  if self.mode == "light" else "#1c1c28"
+    @property
+    def CARD_HOVER(self):  return "#f0f0f5" if self.mode == "light" else "#24243a"
+    @property
+    def LOG_BG(self):      return "#f5f5f8"  if self.mode == "light" else "#0e0e16"
+    @property
+    def LOG_TEXT(self):    return "#4a4a5a"  if self.mode == "light" else "#94a1b8"
+
+    @property
+    def ACCENT_DIM(self):  return "#eae6ff" if self.mode == "light" else "#2e2656"
+    @property
+    def GREEN_BG(self):    return "#ecfdf5" if self.mode == "light" else "#0d2d22"
+    @property
+    def ORANGE_BG(self):   return "#fffbeb" if self.mode == "light" else "#2d2510"
+    @property
+    def RED_BG(self):      return "#fef2f2" if self.mode == "light" else "#2d1418"
+    @property
+    def BLUE_BG(self):     return "#eff6ff" if self.mode == "light" else "#1a2540"
+
+    @property
+    def TEXT(self):        return "#1d1d1f" if self.mode == "light" else "#e8eaf0"
+    @property
+    def TEXT2(self):       return "#6e6e73" if self.mode == "light" else "#8b8fa8"
+    @property
+    def TEXT3(self):       return "#aeaeb2" if self.mode == "light" else "#555872"
+
+    @property
+    def LINE(self):       return "#e2e2e8" if self.mode == "light" else "#252536"
+    @property
+    def LINE_LIGHT(self): return "#c8c8d0" if self.mode == "light" else "#32324a"
+
+    @property
+    def DANGER_BORDER(self): return "#fca5a5" if self.mode == "light" else "#5c2024"
+    @property
+    def DANGER_HOVER_BG(self): return "#fee2e2" if self.mode == "light" else "#3d1a1e"
+
+    def apply(self, mode):
+        self.mode = mode
+
+
+# Global theme instance (default light)
+T = Theme()
+
+
+# ═══════════════════════════════════════════════
+#  Global QSS Builder
+# ═══════════════════════════════════════════════
+
+def build_base_qss():
+    """Re-generate QSS from current theme tokens."""
+    return f"""
+* {{
+    font-family: "Microsoft YaHei", "PingFang SC", "SF Pro Display", sans-serif;  /* # ← 自定义字体族 */
+    font-size: 13px;  /* # ← 字体 全局默认字号 */
+    outline: none;
 }}
-QTabBar::tab:selected {{ color:{C_TEXT}; border-bottom:3px solid {C_ACCENT}; background:transparent; }}
-QTabBar::tab:hover:!selected {{ color:{C_TEXT}; }}
-QLabel {{ color:{C_TEXT}; background:transparent; }}
-QCheckBox {{ color:{C_TEXT}; spacing:8px; background:transparent; }}
-QCheckBox::indicator {{ width:18px; height:18px; border:2px solid {C_BORDER}; border-radius:3px; background:{C_DARK}; }}
-QCheckBox::indicator:checked {{ background:{C_ACCENT}; border-color:{C_ACCENT}; }}
-QComboBox {{ background:{C_DARK}; color:{C_TEXT}; border:1px solid {C_BORDER}; border-radius:4px; padding:6px 10px; min-height:26px; }}
-QComboBox:drop-down {{ border:none; width:20px; }}
-QComboBox QAbstractItemView {{ background:{C_DARK}; color:{C_TEXT}; selection-background-color:{C_ACCENT}; border:1px solid {C_BORDER}; }}
-QPushButton {{ background:{C_DARK}; color:{C_TEXT}; border:1px solid {C_BORDER}; border-radius:4px; padding:6px 14px; min-height:28px; }}
-QPushButton:hover {{ background:#eeeeee; border-color:{C_ACCENT}; }}
-QPushButton:pressed {{ background:#e0e0e0; }}
-QScrollArea {{ border:none; background:transparent; }}
-QScrollBar:vertical {{ background:{C_BG}; width:8px; border:none; }}
-QScrollBar::handle:vertical {{ background:{C_BORDER}; border-radius:4px; min-height:30px; }}
-QScrollBar::handle:vertical:hover {{ background:{C_ACCENT2}; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
-QProgressBar {{ background:{C_BG}; border:1px solid {C_BORDER}; border-radius:3px; height:6px; text-align:center; }}
-QProgressBar::chunk {{ background:{C_ACCENT}; border-radius:3px; }}
-QTextEdit {{ background:{C_DARK}; color:{C_TEXT}; border:1px solid {C_BORDER}; border-radius:4px; padding:8px; font-size:12px; }}
-QSplitter::handle {{ background:{C_BORDER}; width:1px; }}
+
+QMainWindow {{
+    background: {T.BG};
+}}
+
+QLabel {{
+    color: {T.TEXT};
+    background: transparent;
+}}
+
+QCheckBox {{
+    color: {T.TEXT};
+    spacing: 10px;
+}}
+QCheckBox::indicator {{
+    width: 18px; height: 18px;
+    border-radius: 5px;
+    border: 2px solid {T.LINE_LIGHT};
+    background: {T.CARD};
+}}
+QCheckBox::indicator:checked {{
+    background: {T.ACCENT};
+    border-color: {T.ACCENT};
+}}
+QCheckBox::indicator:hover {{
+    border-color: {T.ACCENT2};
+}}
+
+QComboBox, QSpinBox {{
+    background: {T.CARD};
+    color: {T.TEXT};
+    border: 1px solid {T.LINE};
+    border-radius: {T.R_SM}px;
+    padding: 7px 14px;
+    min-height: 34px;
+    max-height: 38px;
+}}
+QComboBox:focus, QSpinBox:focus {{
+    border-color: {T.ACCENT};
+}}
+QComboBox:drop-down {{
+    border: none;
+    width: 24px;
+}}
+QComboBox QAbstractItemView {{
+    background: {T.CARD};
+    color: {T.TEXT};
+    border: 1px solid {T.LINE};
+    outline: none;
+    selection-background-color: {T.ACCENT};
+    selection-color: white;
+    border-radius: {T.R_SM}px;
+    padding: 4px;
+}}
+
+QPushButton {{
+    background: {T.CARD};
+    color: {T.TEXT2};
+    border: 1px solid {T.LINE};
+    border-radius: {T.R_SM}px;
+    padding: 8px 18px;
+    min-height: 34px;
+    font-weight: 500;
+}}
+QPushButton:hover {{
+    background: {T.CARD_HOVER};
+    border-color: {T.LINE_LIGHT};
+    color: {T.TEXT};
+}}
+QPushButton:pressed {{
+    background: {T.SURFACE};
+}}
+
+QScrollArea {{
+    border: none;
+    background: transparent;
+}}
+QScrollBar:vertical {{
+    background: transparent;
+    width: 6px;
+    border: none;
+}}
+QScrollBar::handle:vertical {{
+    background: {T.LINE_LIGHT};
+    border-radius: 3px;
+    min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {T.TEXT3};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
+}}
+
+QProgressBar {{
+    background: {T.LINE};
+    border: none;
+    border-radius: 2px;
+    height: 3px;
+}}
+QProgressBar::chunk {{
+    background: {T.ACCENT};
+    border-radius: 2px;
+}}
+
+QTextEdit {{
+    background: {T.CARD};
+    color: {T.TEXT};
+    border: 1px solid {T.LINE};
+    border-radius: {T.R_SM}px;
+    padding: 12px;
+    font-size: 12px;
+}}
+
+QSplitter::handle {{
+    background: {T.LINE};
+    width: 1px;
+}}
+
+QStatusBar {{
+    background: {T.SURFACE};
+    color: {T.TEXT3};
+    font-size: 12px;
+    border-top: 1px solid {T.LINE};
+    padding: 3px 12px;
+}}
+QStatusBar::item {{
+    border: none;
+}}
 """
 
 
+# ═══════════════════════════════════════════════
+#  UI Helper Functions (theme-aware)
+# ═══════════════════════════════════════════════
+
+def btn_primary(text):
+    """Primary action button — gradient accent style"""  # ← 自定义主按钮字体 (13px/600w)
+    b = QPushButton(text)
+    b.setStyleSheet(f"""
+        QPushButton {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 {T.ACCENT}, stop:1 #60a5fa);
+            color: white;
+            border: none;
+            border-radius: {T.R_SM}px;
+            font-weight: 600;
+            padding: 7px 20px;
+            font-size: 13px;
+        }}
+        QPushButton:hover {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 {T.ACCENT2}, stop:1 #93c5fd);
+        }}
+        QPushButton:pressed {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #6c5ce7, stop:1 #4b8bdb);
+        }}
+        QPushButton:disabled {{
+            background: {T.LINE};
+            color: {T.TEXT3};
+        }}
+    """)
+    return b
+
+
+def btn_danger(text):
+    """Danger button — same size as primary"""  # ← 自定义停止按钮字体 (13px/600w)
+    b = QPushButton(text)
+    b.setStyleSheet(f"""
+        QPushButton {{
+            background: {T.RED_BG};
+            color: {T.RED};
+            border: 1px solid {T.DANGER_BORDER};
+            border-radius: {T.R_SM}px;
+            font-weight: 600;
+            padding: 7px 20px;
+            font-size: 13px;
+        }}
+        QPushButton:hover {{
+            background: {T.DANGER_HOVER_BG};
+            border-color: {T.RED};
+        }}
+        QPushButton:disabled {{
+            background: {T.CARD};
+            color: {T.TEXT3};
+            border-color: {T.LINE};
+        }}
+    """)
+    return b
+
+
+def btn_ghost(text, icon=""):
+    """Ghost button — subtle, for secondary actions"""
+    b = QPushButton(f"{icon}  {text}" if icon else text)
+    b.setStyleSheet(f"""
+        QPushButton {{
+            background: transparent;
+            color: {T.TEXT2};
+            border: 1px solid {T.LINE};
+            border-radius: {T.R_SM}px;
+            padding: 5px 14px;
+            min-height: 32px;
+            max-height: 32px;
+            font-weight: 500;
+            font-size: 12px;
+        }}
+        QPushButton:hover {{
+            background: {T.CARD};
+            color: {T.TEXT};
+            border-color: {T.LINE_LIGHT};
+        }}
+    """)
+    return b
+
+
+def section_header(text):
+    """Section header label — uppercase, muted, tracking"""
+    l = QLabel(text.upper())
+    l.setStyleSheet(f"""
+        font-size: 13px;
+        font-weight: 700;
+        color: {T.TEXT};
+        letter-spacing: 2px;
+        padding-bottom: 2px;
+    """)
+    return l
+
+
+def section_title(text):
+    """Section sub-title — medium weight, secondary color"""
+    l = QLabel(text)
+    l.setStyleSheet(f"font-size:13px; font-weight:700; color:{T.TEXT};")  # ← 自定义分区标题字号
+    return l
+
+
+def page_title(text):
+    """Page title — large, bold, primary color"""
+    l = QLabel(text)
+    l.setStyleSheet(f"font-size:24px; font-weight:700; color:{T.TEXT}; letter-spacing:-0.5px;")
+    return l
+
+
+def page_subtitle(text):
+    """Page subtitle — descriptive, secondary color"""
+    l = QLabel(text)
+    l.setStyleSheet(f"font-size:14px; color:{T.TEXT2}; font-weight:400;")  # ← 自定义描述文字字号
+    return l
+
+
+def sep():
+    """Horizontal separator line"""
+    f = QFrame()
+    f.setFrameShape(QFrame.HLine)
+    f.setStyleSheet(f"color:{T.LINE}; max-height:1px; margin:4px 0;")
+    return f
+
+
+def status_pill(text, color=None, bg=None):
+    """Status pill label — rounded, colored"""
+    if color is None:
+        color = T.GREEN
+    if bg is None:
+        bg = T.GREEN_BG
+    l = QLabel(text)
+    l.setStyleSheet(f"""
+        color: {color};
+        font-size: 12px;
+        font-weight: 600;
+        padding: 5px 14px;
+        min-height: 32px;
+        max-height: 32px;
+        background: {bg};
+        border-radius: {T.R_SM}px;
+        border: 1px solid {color}22;
+    """)
+    return l
+
+
+# ═══════════════════════════════════════════════
+#  Task Worker (unchanged)
+# ═══════════════════════════════════════════════
+
 class TaskWorker(QThread):
-    log = Signal(str, str)
-    finished = Signal(dict)
-    task_changed = Signal(str)
+    log = Signal(str, str); finished = Signal(dict); step = Signal(str)
 
     def __init__(self, task_file, tpl_dir=None, no_popup=False, region=None):
         super().__init__()
@@ -79,48 +434,56 @@ class TaskWorker(QThread):
 
     def run(self):
         try:
-            vision = Vision()
-            if self.tpl_dir: vision.set_template_dir(self.tpl_dir)
-            ctrl = Controller()
-            popup = PopupHandler(vision, ctrl)
-            popup.enabled = not self.no_popup
-            engine = TaskEngine(ctrl, vision, popup)
+            v = Vision()
+            if self.tpl_dir:
+                v.set_template_dir(self.tpl_dir)
+            c = Controller()
+            p = PopupHandler(v, c)
+            p.enabled = not self.no_popup
+            p.register_builtin_strategies()
+            engine = TaskEngine(c, v, p)
             engine.region = self.region
-            engine._user_log = lambda msg, level: self.log.emit(msg, level)
+            engine._user_log = lambda m, l: self.log.emit(m, l)
             if self.region:
                 callback_2048._palette = None
                 engine.on("play_2048", callback_2048)
             engine.load(self.task_file)
             entry = list(engine._tasks.keys())[0]
             self.log.emit(f"任务: {os.path.basename(self.task_file)}", "INFO")
-            self.log.emit(f"入口: {entry}", "INFO")
-
             orig = engine._execute_step
             cnt = [0]
+
             def hook(ss, t):
-                if not self._active: return False
+                if not self._active:
+                    return False
                 cnt[0] += 1
-                self.task_changed.emit(t.get("desc", ""))
+                self.step.emit(t.get("desc", ""))
                 return orig(ss, t)
+
             engine._execute_step = hook
             engine.run(entry)
             s = engine._stats
-            self.log.emit(f"完成: {s['steps']}步, {s['popups_handled']}弹窗, {s['errors']}错误", "SUCCESS")
+            self.log.emit(f"完成: {s['steps']}步 {s['popups_handled']}弹窗 {s['errors']}错误", "SUCCESS")
             self.finished.emit(s)
         except Exception as e:
             import traceback
-            self.log.emit(f"错误: {e}", "ERROR")
+            self.log.emit(str(e), "ERROR")
             self.log.emit(traceback.format_exc(), "ERROR")
 
-    def stop(self): self._active = False
+    def stop(self):
+        self._active = False
 
+
+# ═══════════════════════════════════════════════
+#  Region Selector
+# ═══════════════════════════════════════════════
 
 class RegionSelector(QDialog):
-    """全屏遮罩拖拽选区域"""
     def __init__(self):
         super().__init__()
         self.region = None
-        self.start = self.end = None
+        self.s = None
+        self.e = None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setWindowState(Qt.WindowFullScreen)
         self.setCursor(Qt.CrossCursor)
@@ -128,32 +491,217 @@ class RegionSelector(QDialog):
         self.bg = screen.grabWindow(0)
         self.setGeometry(screen.geometry())
 
-    def paintEvent(self, e):
+    def paintEvent(self, ev):
         p = QPainter(self)
         p.drawPixmap(0, 0, self.bg)
-        p.fillRect(self.rect(), QColor(0,0,0,130))
-        if self.start and self.end:
-            r = QRect(self.start, self.end).normalized()
+        p.fillRect(self.rect(), QColor(10, 10, 18, 180))
+        if self.s and self.e:
+            r = QRect(self.s, self.e).normalized()
             p.drawPixmap(r, self.bg, r)
-            p.setPen(QPen(QColor(C_ACCENT), 2))
+            p.setPen(QPen(QColor(T.ACCENT), 3))
             p.drawRect(r)
-            p.setPen(QColor("white"))
-            p.drawText(r.left()+4, r.top()+16, f"{r.width()} x {r.height()}")
+            c = QColor(T.ACCENT2)
+            c.setAlpha(120)
+            p.setPen(QPen(c, 1))
+            p.drawRect(r.adjusted(2, 2, -2, -2))
+            p.setPen(QColor("#ffffff"))
+            p.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
+            label = f"{r.width()} x {r.height()}"
+            p.drawText(r.left() + 8, r.top() + 24, label)
 
-    def mousePressEvent(self, e): self.start = self.end = e.pos(); self.update()
-    def mouseMoveEvent(self, e): self.end = e.pos(); self.update()
+    def mousePressEvent(self, e):
+        self.s = self.e = e.pos()
+        self.update()
+
+    def mouseMoveEvent(self, e):
+        self.e = e.pos()
+        self.update()
+
     def mouseReleaseEvent(self, e):
-        self.end = e.pos()
-        r = QRect(self.start, self.end).normalized()
-        if r.width()>20 and r.height()>20:
+        self.e = e.pos()
+        r = QRect(self.s, self.e).normalized()
+        if r.width() > 20 and r.height() > 20:
             self.region = (r.x(), r.y(), r.width(), r.height())
             self.accept()
         else:
             self.reject()
 
     def keyPressEvent(self, e):
-        if e.key() == Qt.Key_Escape: self.reject()
+        if e.key() == Qt.Key_Escape:
+            self.reject()
 
+
+# ═══════════════════════════════════════════════
+#  Tab Navigation Button
+# ═══════════════════════════════════════════════
+
+class NavButton(QPushButton):
+    """Navigation button — ChemCal-style tab appearance"""
+    def __init__(self, label, parent=None):
+        super().__init__(label, parent)
+        self._active = False
+        self.setCursor(Qt.PointingHandCursor)
+        self._update_style()
+
+    def set_active(self, active):
+        self._active = active
+        self._update_style()
+
+    def _update_style(self):
+        if self._active:
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background: {T.CARD};
+                    color: {T.TEXT};
+                    border: 1px solid {T.LINE};
+                    border-bottom: none;
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                    padding: 0 20px;
+                    margin-right: 2px;
+                    font-weight: 600;  /* ← 自定义导航标签字号 (选中的 Tab) */
+                    font-size: 13px;  /* ← 自定义导航标签字号 */
+                }}
+            """)
+        else:
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background: {T.SURFACE};
+                    color: {T.TEXT2};
+                    border: 1px solid {T.LINE};
+                    border-bottom: 1px solid {T.LINE};
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                    padding: 0 20px;
+                    margin-right: 2px;
+                    font-weight: 500;  /* ← 自定义导航标签字号 (未选中的 Tab) */
+                    font-size: 13px;  /* ← 自定义导航标签字号 */
+                }}
+                QPushButton:hover {{
+                    background: {T.CARD_HOVER};
+                    color: {T.TEXT};
+                }}
+            """)
+
+
+# ═══════════════════════════════════════════════
+#  Pulse Dot — Animated Status Indicator
+# ═══════════════════════════════════════════════
+
+class PulseDot(QWidget):
+    """Animated pulsing dot for running status"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(12, 12)
+        self._opacity = 1.0
+        self._growing = False
+        self._color = T.TEXT3
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+
+    def set_color(self, color):
+        self._color = color
+        self.update()
+
+    def start_pulse(self):
+        self._timer.start(600)
+
+    def stop_pulse(self):
+        self._timer.stop()
+        self._opacity = 1.0
+        self._growing = False
+        self.update()
+
+    def _tick(self):
+        if self._growing:
+            self._opacity += 0.3
+            if self._opacity >= 1.0:
+                self._opacity = 1.0
+                self._growing = False
+        else:
+            self._opacity -= 0.3
+            if self._opacity <= 0.3:
+                self._opacity = 0.3
+                self._growing = True
+        self.update()
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        c = QColor(self._color)
+        c.setAlphaF(self._opacity * 0.3)
+        p.setBrush(c)
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(0, 0, 12, 12)
+        c2 = QColor(self._color)
+        c2.setAlphaF(self._opacity)
+        p.setBrush(c2)
+        p.drawEllipse(2, 2, 8, 8)
+        p.end()
+
+
+# ═══════════════════════════════════════════════
+#  Theme Toggle Switch
+# ═══════════════════════════════════════════════
+
+class ThemeSwitch(QWidget):
+    """A light/dark segmented control — horizontal pill with '浅色' / '深色' labels."""
+    toggled = Signal(str)   # emits 'light' or 'dark'
+
+    def __init__(self, initial="light", parent=None):
+        super().__init__(parent)
+        self._is_dark = (initial == "dark")
+        self.setFixedSize(100, 32)
+        self.setCursor(Qt.PointingHandCursor)
+        self._update_style()
+
+    def mousePressEvent(self, e):
+        self._is_dark = not self._is_dark
+        self._update_style()
+        self.toggled.emit("dark" if self._is_dark else "light")
+
+    def set_mode(self, mode):
+        self._is_dark = (mode == "dark")
+        self._update_style()
+
+    def _update_style(self):
+        self.update()
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+
+        w, h = self.width(), self.height()
+        half = w // 2
+        r = h // 2  # full pill radius
+
+        # Container background
+        c = QColor(T.LINE)
+        p.setBrush(c)
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(0, 0, w, h, r, r)
+
+        # Active pill — slides to left (light) or right (dark)
+        active_rect = QRect(2, 2, half - 2, h - 4)
+        if self._is_dark:
+            active_rect = QRect(half, 2, half - 2, h - 4)
+
+        p.setBrush(QColor(T.CARD))
+        p.drawRoundedRect(active_rect, r - 2, r - 2)
+
+        # Text
+        p.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Medium))
+        for i, (txt, is_active) in enumerate([("浅色", not self._is_dark), ("深色", self._is_dark)]):
+            tx = i * half
+            p.setPen(QColor(T.TEXT) if is_active else QColor(T.TEXT3))
+            p.drawText(QRect(tx, 0, half, h), Qt.AlignCenter, txt)
+
+        p.end()
+
+
+# ═══════════════════════════════════════════════
+#  Main Window (2026 Layout)
+# ═══════════════════════════════════════════════
 
 class SmartRPAGUI(QMainWindow):
     def __init__(self):
@@ -161,16 +709,19 @@ class SmartRPAGUI(QMainWindow):
         self.worker = None
         self._running = False
         self._task_map = {}
-        self._checkboxes = {}
-        self._region = (0, 0, QApplication.primaryScreen().size().width(),
-                        QApplication.primaryScreen().size().height())
-        self._editor_steps = []
+        sz = QApplication.primaryScreen().size()
+        self._region = (0, 0, sz.width(), sz.height())
+        self._ed = []
+        self._nav_idx = 0
+        self._settings = QSettings("SmartRPA", "SmartRPA")
+        # Restore theme preference
+        saved = self._settings.value("theme", "light")
+        T.apply(saved)
         self._build()
         self._scan()
         self.setWindowTitle("SmartRPA")
-        self.resize(980, 700)
-
-    # ── BUILD ──
+        self.resize(1160, 760)
+        self.setMinimumSize(940, 600)
 
     def _build(self):
         cw = QWidget()
@@ -179,489 +730,1017 @@ class SmartRPAGUI(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Top bar: tabs + task selector ──
-        bar = QWidget()
-        bar.setStyleSheet(f"background:{C_DARK};")
-        bar_h = QHBoxLayout(bar)
-        bar_h.setContentsMargins(0, 0, 8, 0)
-        bar_h.setSpacing(0)
+        # ═══ TOP: Navigation Bar ═══
+        top_nav = QWidget()
+        top_nav.setFixedHeight(44)
+        top_nav.setStyleSheet(f"background: {T.SURFACE};")
+        tn_ly = QHBoxLayout(top_nav)
+        tn_ly.setContentsMargins(T.SP_LG, 0, T.SP_LG, 0)
+        tn_ly.setSpacing(0)
 
-        self.tab_btns = {}
-        self.tab_stack = QStackedWidget()
-        for name, label in [("Tasks","自动化任务"), ("Editor","任务编辑器"), ("Settings","设置"), ("About","关于")]:
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setStyleSheet(f"""
-                QPushButton {{ background:transparent; color:{C_TEXT2}; border:none; 
-                    border-bottom:3px solid transparent; padding:12px 22px; font-size:13px; }}
-                QPushButton:checked {{ color:{C_ACCENT}; border-bottom:3px solid {C_ACCENT}; }}
-                QPushButton:hover:!checked {{ color:{C_TEXT}; }}
-            """)
-            btn.clicked.connect(lambda _, n=name: self._switch_tab(n))
-            bar_h.addWidget(btn)
-            self.tab_btns[name] = btn
-        bar_h.addStretch()
-        root.addWidget(bar)
-
-        # ── Tab pages ──
-        self.tab_stack.addWidget(self._page_tasks())
-        self.tab_stack.addWidget(self._page_editor())
-        self.tab_stack.addWidget(self._page_settings())
-        self.tab_stack.addWidget(self._page_about())
-        root.addWidget(self.tab_stack, 1)
-        self._switch_tab("Tasks")
-
-    def _switch_tab(self, name):
-        for tn, btn in self.tab_btns.items():
-            btn.setChecked(tn == name)
-        pages = {"Tasks":0, "Editor":1, "Settings":2, "About":3}
-        self.tab_stack.setCurrentIndex(pages.get(name, 0))
-
-    # ── PAGE: Tasks (3-column) ──
-
-    def _section(self, title):
-        """Return a styled section label"""
-        lbl = QLabel(title)
-        lbl.setStyleSheet(f"color:{C_TEXT2}; font-size:11px; font-weight:bold; padding:4px 0;")
-        return lbl
-
-    def _page_tasks(self):
-        page = QWidget()
-        page.setStyleSheet(f"background:{C_BG};")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        split = QSplitter(Qt.Horizontal)
-        split.setHandleWidth(1)
-
-        # ── COL 1: Step checklist ──
-        left = QWidget()
-        left.setStyleSheet(f"background:{C_DARK};")
-        ll = QVBoxLayout(left)
-        ll.setContentsMargins(14, 14, 14, 10)
-        ll.setSpacing(6)
-
-        ll.addWidget(self._section("任务步骤"))
-        self.task_list = QWidget()
-        self.task_list_layout = QVBoxLayout(self.task_list)
-        self.task_list_layout.setSpacing(4)
-        self.task_list_layout.setContentsMargins(0, 4, 0, 0)
-        self.task_list_layout.addStretch()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.task_list)
-        ll.addWidget(scroll, 1)
-        split.addWidget(left)
-
-        # ── COL 2: Config ──
-        center = QWidget()
-        cl = QVBoxLayout(center)
-        cl.setContentsMargins(18, 16, 18, 12)
-        cl.setSpacing(10)
-
-        #  选择任务
-        cl.addWidget(self._section("选择任务"))
-        task_bar = QHBoxLayout()
-        self.task_combo = QComboBox()
-        self.task_combo.setMinimumWidth(160)
-        self.task_combo.currentIndexChanged.connect(self._on_task_changed)
-        task_bar.addWidget(self.task_combo, 1)
-        scan_btn = QPushButton("扫描")
-        scan_btn.clicked.connect(self._scan)
-        task_bar.addWidget(scan_btn)
-        cl.addLayout(task_bar)
-
-        cl.addWidget(QHLine())
-
-        #  模板目录
-        cl.addWidget(self._section("模板目录"))
-        tpl_bar = QHBoxLayout()
-        self.tpl_combo = QComboBox()
-        self.tpl_combo.setEditable(True)
-        tpl_bar.addWidget(self.tpl_combo, 1)
-        tpl_btn = QPushButton("浏览")
-        tpl_btn.setMaximumWidth(50)
-        tpl_btn.clicked.connect(self._browse_tpl)
-        tpl_bar.addWidget(tpl_btn)
-        cl.addLayout(tpl_bar)
-
-        cl.addWidget(QHLine())
-
-        #  操作区域
-        cl.addWidget(self._section("操作区域"))
-        reg_row = QHBoxLayout()
-        self.region_lbl = QLabel("全屏")
-        self.region_lbl.setStyleSheet(f"color:{C_SUCCESS}; padding:5px 10px; background:{C_CARD}; border-radius:3px;")
-        reg_row.addWidget(self.region_lbl, 1)
-        reg_btn = QPushButton("框选区域")
-        reg_btn.clicked.connect(self._select_region)
-        reg_row.addWidget(reg_btn)
-        cl.addLayout(reg_row)
-
-        cl.addWidget(QHLine())
-
-        #  其他选项
-        cl.addWidget(self._section("运行选项"))
-        self.popup_cb = QCheckBox("自动处理弹窗")
-        self.popup_cb.setChecked(True)
-        cl.addWidget(self.popup_cb)
-
-        cl.addStretch()
-        split.addWidget(center)
-
-        # ── COL 3: Log ──
-        right = QWidget()
-        rl = QVBoxLayout(right)
-        rl.setContentsMargins(14, 14, 14, 10)
-        rl.setSpacing(8)
-
-        rl.addWidget(self._section("运行日志"))
-        self.log_widget = QTextEdit()
-        self.log_widget.setReadOnly(True)
-        self.log_widget.setFont(QFont("Consolas", 10))
-        self.log_widget.document().setMaximumBlockCount(2000)
-        rl.addWidget(self.log_widget, 1)
-        split.addWidget(right)
-
-        split.setSizes([200, 280, 420])
-        layout.addWidget(split, 1)
-
-        # ── Bottom bar ──
-        bottom = QWidget()
-        bottom.setStyleSheet(f"background:{C_DARK};")
-        bh = QHBoxLayout(bottom)
-        bh.setContentsMargins(16, 10, 16, 10)
-        bh.setSpacing(12)
-
-        self.start_btn = QPushButton("Link Start!")
-        self.start_btn.setMinimumSize(140, 40)
-        self.start_btn.setStyleSheet(f"""
-            QPushButton{{background:{C_START}; color:white; border:none; border-radius:4px; 
-                         font-size:16px; font-weight:bold;}}
-            QPushButton:hover{{background:#2ecc71;}}
-            QPushButton:disabled{{background:#2a3a5c; color:#555;}}
+        # Logo
+        self._logo_label = QLabel("SmartRPA")
+        self._logo_label.setStyleSheet(f"""
+            font-size: 15px;  /* ← 自定义 Logo 字号 */
+            font-weight: 800;  /* ← 自定义 Logo 字重 */
+            color: {T.TEXT};
+            letter-spacing: -0.3px;
+            padding: 0 12px 0 4px;
         """)
-        self.start_btn.clicked.connect(self._start)
-        bh.addWidget(self.start_btn)
+        tn_ly.addWidget(self._logo_label)
 
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.setMinimumSize(100, 40)
-        self.stop_btn.setStyleSheet(f"""
-            QPushButton{{background:{C_ERROR}; color:white; border:none; border-radius:4px;
-                         font-size:15px; font-weight:bold;}}
-            QPushButton:hover{{background:#ef5350;}}
-            QPushButton:disabled{{background:#2a3a5c; color:#555;}}
+        # Nav buttons
+        self.nav_btns = []
+        nav_items = [
+            "自动化任务",
+            "任务编辑器",
+            "关于",
+        ]
+        for label in nav_items:
+            btn = NavButton(label)
+            btn.clicked.connect(lambda checked, idx=len(self.nav_btns): self._switch_page(idx))
+            btn.setFixedHeight(44)
+            tn_ly.addWidget(btn)
+            self.nav_btns.append(btn)
+        self.nav_btns[0].set_active(True)
+
+        tn_ly.addStretch(1)
+
+        # Right-side items with spacing
+        right_container = QWidget()
+        right_container.setStyleSheet("background: transparent;")
+        rc_ly = QHBoxLayout(right_container)
+        rc_ly.setContentsMargins(0, 0, 0, 0)
+        rc_ly.setSpacing(6)
+
+        # Status indicator
+        self.pulse_dot = PulseDot()
+        rc_ly.addWidget(self.pulse_dot)
+
+        self.state_lbl = QLabel("就绪")
+        self.state_lbl.setStyleSheet(f"color:{T.TEXT2}; font-size:12px; font-weight:500; padding: 0 8px 0 4px;")  # ← 自定义状态文字字号（就绪）
+        rc_ly.addWidget(self.state_lbl)
+
+        # Theme toggle
+        self.theme_switch = ThemeSwitch(T.mode)
+        self.theme_switch.toggled.connect(self._on_theme_toggle)
+        rc_ly.addWidget(self.theme_switch)
+
+        # Version
+        self._ver_label = QLabel("v0.1.0")
+        self._ver_label.setStyleSheet(f"""
+            font-size: 11px;
+            color: {T.TEXT3};
+            padding: 0 4px 0 8px;
         """)
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self._stop)
-        bh.addWidget(self.stop_btn)
+        rc_ly.addWidget(self._ver_label)
 
+        tn_ly.addWidget(right_container)
+
+        self.top_nav = top_nav
+        root.addWidget(top_nav)
+
+        # ═══ Content Area ═══
+        self.right_widget = QWidget()
+        self.right_widget.setStyleSheet(f"background: {T.BG};")
+        right_ly = QVBoxLayout(self.right_widget)
+        right_ly.setContentsMargins(0, 0, 0, 0)
+        right_ly.setSpacing(0)
+
+        # ── Thin progress bar at top of content area ──
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setTextVisible(False)
-        self.progress.setMaximumHeight(4)
+        self.progress.setMaximumHeight(2)
         self.progress.hide()
-        bh.addWidget(self.progress, 1)
+        right_ly.addWidget(self.progress)
 
-        bh.addStretch()
+        # ── Content Stack ──
+        self.content_stack = QStackedWidget()
+        self._tasks_page = self._tasks_content()
+        self._editor_page = self._editor_content()
+        self._about_page = self._about_content()
+        self.content_stack.addWidget(self._tasks_page)
+        self.content_stack.addWidget(self._editor_page)
+        self.content_stack.addWidget(self._about_page)
+        right_ly.addWidget(self.content_stack, 1)
 
-        self.task_hint = QLabel("")
-        self.task_hint.setStyleSheet(f"color:{C_ACCENT}; font-size:13px;")
-        bh.addWidget(self.task_hint)
+        # ── Status Bar ──
+        self.status = QStatusBar()
+        self.status_lbl = QLabel(" 选择任务后点击「开始运行」")
+        self.status_lbl.setStyleSheet(f"color:{T.TEXT3};")
+        self.status.addWidget(self.status_lbl, 1)
+        self.setStatusBar(self.status)
 
-        layout.addWidget(bottom)
+        root.addWidget(self.right_widget, 1)
+
+    # ── Theme Toggle ──
+
+    def _on_theme_toggle(self, mode):
+        T.apply(mode)
+        self._settings.setValue("theme", mode)
+        self.theme_switch.set_mode(mode)
+        # Re-apply global QSS
+        QApplication.instance().setStyleSheet(build_base_qss())
+        # Rebuild all inline styles by refreshing the whole UI
+        self._refresh_all_styles()
+
+    def _refresh_all_styles(self):
+        """Refresh all inline styles after theme switch."""
+        # Top nav bar
+        self.top_nav.setStyleSheet(f"background: {T.SURFACE};")
+
+        self.right_widget.setStyleSheet(f"background: {T.BG};")
+
+        # Logo
+        if hasattr(self, '_logo_label'):
+            self._logo_label.setStyleSheet(f"""
+                font-size: 15px;
+                font-weight: 800;
+                color: {T.TEXT};
+                letter-spacing: -0.3px;
+                padding: 0 12px 0 4px;
+            """)
+
+        # Version label
+        if hasattr(self, '_ver_label'):
+            self._ver_label.setStyleSheet(f"""
+                font-size: 11px;
+                color: {T.TEXT3};
+                padding: 0 4px 0 8px;
+            """)
+
+        # Status label
+        if not self._running:
+            self.state_lbl.setStyleSheet(f"color:{T.TEXT2}; font-size:12px; font-weight:500; padding: 0 8px 0 4px;")
+        else:
+            self.state_lbl.setStyleSheet(f"color:{T.ACCENT2}; font-size:12px; font-weight:600; padding: 0 8px 0 4px;")
+
+        # Re-style run button
+        self.run_btn.setStyleSheet("")  # clear cached template
+        self._update_run_btn_style()
+
+        # Pulse dot base color
+        if not self._running:
+            self.pulse_dot.set_color(T.TEXT3)
+
+        # Bottom status bar
+        self.status_lbl.setStyleSheet(f"color:{T.TEXT3};")
+
+        # Nav buttons
+        for i, btn in enumerate(self.nav_btns):
+            btn._update_style()
+
+        # Theme switch
+        self.theme_switch._update_style()
+
+        # Refresh content pages
+        self._refresh_tasks_styles()
+        self._refresh_editor_styles()
+        self._refresh_about_styles()
+
+    def _refresh_tasks_styles(self):
+        """Refresh the tasks page inline styles."""
+        page = self._tasks_page
+        page.setStyleSheet(f"background:{T.BG};")
+
+        # Config card
+        if hasattr(self, '_config_card'):
+            self._config_card.setStyleSheet(f"""
+                background: {T.CARD};
+                border: none;
+                border-radius: {T.R_LG}px;
+            """)
+
+        # Log card
+        if hasattr(self, '_log_card'):
+            self._log_card.setStyleSheet(f"""
+                background: {T.CARD};
+                border: none;
+                border-radius: {T.R_LG}px;
+            """)
+
+        # Task combo & template combo (green pills)
+        for combo in [self.task_combo, self.tpl_combo]:
+            if hasattr(self, 'task_combo'):
+                combo.setStyleSheet(f"""
+                    QComboBox {{
+                        background: {T.GREEN_BG};
+                        color: {T.GREEN};
+                        border: 1px solid {T.GREEN}22;
+                        border-radius: {T.R_SM}px;
+                        padding: 5px 14px;
+                        min-height: 32px;
+                        max-height: 32px;
+                        font-weight: 600;
+                        font-size: 12px;
+                    }}
+                    QComboBox::drop-down {{
+                        border: none;
+                        width: 24px;
+                    }}
+                    QComboBox::drop-down:on {{
+                        background: {T.GREEN_BG};
+                    }}
+                    QComboBox:hover {{
+                        background: {T.GREEN_BG};
+                        border: 1px solid {T.GREEN}44;
+                    }}
+                """)
+
+        # QSplitter handle
+        for splitter in page.findChildren(QSplitter):
+            splitter.setStyleSheet(f"QSplitter::handle{{background:{T.LINE};}}")
+
+        # Log panel
+        self.log.setStyleSheet(f"""
+            background: {T.LOG_BG};
+            color: {T.LOG_TEXT};
+            border: 1px solid {T.LINE};
+            border-radius: {T.R_MD}px;
+            padding: 14px;
+            font-size: 12px;
+            selection-background-color: {T.ACCENT_DIM};
+        """)
+
+        # Region pill
+        self.region_lbl.setStyleSheet(f"""
+            color: {T.GREEN};
+            font-size: 12px;
+            font-weight: 600;
+            padding: 5px 14px;
+            min-height: 32px;
+            max-height: 32px;
+            background: {T.GREEN_BG};
+            border-radius: {T.R_SM}px;
+            border: 1px solid {T.GREEN}22;
+        """)
+
+    def _refresh_editor_styles(self):
+        """Refresh the editor page inline styles."""
+        self._editor_page.setStyleSheet(f"background:{T.BG};")
+
+        # Editor card
+        if hasattr(self, '_editor_card'):
+            self._editor_card.setStyleSheet(f"""
+                background: {T.CARD};
+                border: none;
+                border-radius: {T.R_LG}px;
+            """)
+
+        # Editor name combo
+        if hasattr(self, 'ed_name'):
+            self.ed_name.setStyleSheet(f"""
+                QComboBox {{
+                    background: {T.GREEN_BG};
+                    color: {T.GREEN};
+                    border: 1px solid {T.GREEN}22;
+                    border-radius: {T.R_SM}px;
+                    padding: 5px 14px;
+                    min-height: 32px;
+                    max-height: 32px;
+                    font-weight: 600;
+                    font-size: 12px;
+                }}
+                QComboBox::drop-down {{
+                    border: none;
+                    width: 24px;
+                }}
+                QComboBox:hover {{
+                    background: {T.GREEN_BG};
+                    border: 1px solid {T.GREEN}44;
+                }}
+            """)
+
+        # Editor loop spinbox
+        if hasattr(self, 'ed_loop'):
+            self.ed_loop.setStyleSheet(f"""
+                QSpinBox {{
+                    background: {T.GREEN_BG};
+                    color: {T.GREEN};
+                    border: 1px solid {T.GREEN}22;
+                    border-radius: {T.R_SM}px;
+                    padding: 5px 14px;
+                    min-height: 32px;
+                    max-height: 32px;
+                    font-weight: 600;
+                    font-size: 12px;
+                }}
+                QSpinBox::up-button, QSpinBox::down-button {{
+                    border: none;
+                    width: 20px;
+                    background: transparent;
+                }}
+                QSpinBox:hover {{
+                    border: 1px solid {T.GREEN}44;
+                }}
+            """)
+
+        self.ed_list.setStyleSheet(f"""
+            background: {T.SURFACE};
+            color: {T.TEXT};
+            border: 1px solid {T.LINE};
+            border-radius: {T.R_MD}px;
+            padding: 14px;
+            font-size: 12px;
+        """)
+
+    def _refresh_about_styles(self):
+        """Refresh the about page inline styles."""
+        self._about_page.setStyleSheet(f"background:{T.BG};")
+        if hasattr(self, '_about_card'):
+            self._about_card.setStyleSheet(f"""
+                background: {T.CARD};
+                border: none;
+                border-radius: {T.R_XL}px;
+            """)
+        # About page text labels
+        if hasattr(self, '_about_icon'):
+            self._about_icon.setStyleSheet(f"font-size:48px; color:{T.ACCENT}; background:transparent;")
+        if hasattr(self, '_about_title'):
+            self._about_title.setStyleSheet(f"font-size:28px; font-weight:800; color:{T.TEXT}; letter-spacing:-1px;")
+        if hasattr(self, '_about_desc'):
+            self._about_desc.setStyleSheet(f"color:{T.TEXT2}; font-size:15px;")
+        if hasattr(self, '_about_ver'):
+            self._about_ver.setStyleSheet(f"color:{T.ACCENT}; font-size:13px; font-weight:600; padding:4px 16px; background:{T.ACCENT_DIM}; border-radius:{T.R_SM}px;")
+        if hasattr(self, '_about_tech'):
+            self._about_tech.setStyleSheet(f"color:{T.TEXT3}; font-size:12px; letter-spacing:0.5px;")
+
+    # ── Page Switching ──
+
+    def _switch_page(self, idx):
+        self._nav_idx = idx
+        self.content_stack.setCurrentIndex(idx)
+        for i, btn in enumerate(self.nav_btns):
+            btn.set_active(i == idx)
+
+    # ══════════════════════════════════════
+    #  PAGE: 自动化任务 (3-column Bento)
+    # ══════════════════════════════════════
+
+    def _tasks_content(self):
+        page = QWidget()
+        page.setStyleSheet(f"background:{T.BG};")
+        ly = QVBoxLayout(page)
+        ly.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
+        ly.setSpacing(T.SP_LG)
+
+        split = QSplitter(Qt.Horizontal)
+        split.setHandleWidth(1)
+        split.setStyleSheet(f"QSplitter::handle{{background:{T.LINE};}}")
+
+        # ── LEFT: Config Panel ──
+        self._config_card = QWidget()
+        self._config_card.setStyleSheet(f"""
+            background: {T.CARD};
+            border: none;
+            border-radius: {T.R_LG}px;
+        """)
+        Cl = QVBoxLayout(self._config_card)
+        Cl.setContentsMargins(T.SP_XL, T.SP_XL, T.SP_XL, T.SP_XL)
+        Cl.setSpacing(T.SP_LG)
+
+        # Task selection
+        Cl.addWidget(section_title("任务"))
+        tb = QHBoxLayout()
+        tb.setSpacing(T.SP_SM)
+        self.task_combo = QComboBox()
+        self.task_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {T.GREEN_BG};
+                color: {T.GREEN};
+                border: 1px solid {T.GREEN}22;
+                border-radius: {T.R_SM}px;
+                padding: 5px 14px;
+                min-height: 32px;
+                max-height: 32px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox::drop-down:on {{
+                background: {T.GREEN_BG};
+            }}
+            QComboBox:hover {{
+                background: {T.GREEN_BG};
+                border: 1px solid {T.GREEN}44;
+            }}
+        """)
+        self.task_combo.currentIndexChanged.connect(self._on_task_changed)
+        tb.addWidget(self.task_combo, 1)
+        scan_btn = btn_ghost("扫描")
+        scan_btn.setFixedWidth(64)
+        scan_btn.clicked.connect(self._scan)
+        tb.addWidget(scan_btn)
+        Cl.addLayout(tb)
+
+        # Template path
+        Cl.addWidget(section_title("模板路径"))
+        tpb = QHBoxLayout()
+        tpb.setSpacing(T.SP_SM)
+        self.tpl_combo = QComboBox()
+        self.tpl_combo.setEditable(True)
+        self.tpl_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {T.GREEN_BG};
+                color: {T.GREEN};
+                border: 1px solid {T.GREEN}22;
+                border-radius: {T.R_SM}px;
+                padding: 5px 14px;
+                min-height: 32px;
+                max-height: 32px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox:hover {{
+                background: {T.GREEN_BG};
+                border: 1px solid {T.GREEN}44;
+            }}
+        """)
+        tpb.addWidget(self.tpl_combo, 1)
+        browse_btn = btn_ghost("浏览")
+        browse_btn.setFixedWidth(64)
+        browse_btn.clicked.connect(self._browse_tpl)
+        tpb.addWidget(browse_btn)
+        Cl.addLayout(tpb)
+
+        # Region
+        Cl.addWidget(section_title("操作区域"))
+        rb = QHBoxLayout()
+        rb.setSpacing(T.SP_SM)
+        self.region_lbl = status_pill("全屏")
+        rb.addWidget(self.region_lbl, 1)
+        region_btn = btn_ghost("框选")
+        region_btn.setFixedWidth(64)
+        region_btn.clicked.connect(self._select_region)
+        rb.addWidget(region_btn)
+        Cl.addLayout(rb)
+
+        # Options
+        Cl.addWidget(section_title("选项"))
+        self.popup_cb = QCheckBox("自动处理弹窗")
+        self.popup_cb.setChecked(True)
+        Cl.addWidget(self.popup_cb)
+
+        Cl.addStretch(1)
+
+        # Run / Stop toggle at bottom of config panel
+        self.run_btn = QPushButton("\u25B6  开始运行")
+        self.run_btn.setCursor(Qt.PointingHandCursor)
+        self.run_btn.setMinimumHeight(40)
+        self.run_btn.clicked.connect(self._toggle_run)
+        Cl.addWidget(self.run_btn)
+        self._update_run_btn_style()
+
+        split.addWidget(self._config_card)
+
+        # ── RIGHT: Log Panel ──
+        self._log_card = QWidget()
+        self._log_card.setStyleSheet(f"""
+            background: {T.CARD};
+            border: none;
+            border-radius: {T.R_LG}px;
+        """)
+        Rl = QVBoxLayout(self._log_card)
+        Rl.setContentsMargins(T.SP_LG, T.SP_XL, T.SP_LG, T.SP_LG)
+        Rl.setSpacing(T.SP_MD)
+
+        Rl.addWidget(section_header("日志"))
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setStyleSheet(f"""
+            background: {T.LOG_BG};
+            color: {T.LOG_TEXT};
+            border: 1px solid {T.LINE};
+            border-radius: {T.R_MD}px;
+            padding: 14px;
+            font-size: 12px;
+            selection-background-color: {T.ACCENT_DIM};
+        """)
+        self.log.setFont(QFont("Cascadia Code,Consolas,monospace", 10))  # ← 自定义日志等宽字体
+        self.log.document().setMaximumBlockCount(2000)
+        Rl.addWidget(self.log, 1)
+        split.addWidget(self._log_card)
+
+        split.setSizes([300, 540])
+        ly.addWidget(split, 1)
+
         return page
 
-    # ── PAGE: Editor ──
+    def _update_run_btn_style(self):
+        """Update the run/stop button style based on running state."""
+        if self._running:
+            self.run_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {T.RED_BG};
+                    color: {T.RED};
+                    border: 1px solid {T.DANGER_BORDER};
+                    border-radius: {T.R_LG}px;
+                    font-weight: 600;  /* ← 自定义停止状态按钮字号 */
+                    font-size: 14px;  /* ← 自定义停止状态按钮字号 */
+                    padding: 10px 0;
+                }}
+                QPushButton:hover {{
+                    background: {T.DANGER_HOVER_BG};
+                    border-color: {T.RED};
+                }}
+            """)
+        else:
+            self.run_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 {T.ACCENT}, stop:1 #60a5fa);
+                    color: white;
+                    border: none;
+                    border-radius: {T.R_LG}px;
+                    font-weight: 600;  /* ← 自定义运行状态按钮字号 */
+                    font-size: 14px;  /* ← 自定义运行状态按钮字号 */
+                    padding: 10px 0;
+                }}
+                QPushButton:hover {{
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 {T.ACCENT2}, stop:1 #93c5fd);
+                }}
+                QPushButton:disabled {{
+                    background: {T.LINE};
+                    color: {T.TEXT3};
+                }}
+            """)
 
-    def _page_editor(self):
+    def _toggle_run(self):
+        """Toggle between start and stop."""
+        if self._running:
+            self._stop()
+        else:
+            self._start()
+
+    # ══════════════════════════════════════
+    #  PAGE: 任务编辑器
+    # ══════════════════════════════════════
+
+    def _editor_content(self):
         w = QWidget()
+        w.setStyleSheet(f"background:{T.BG};")
         ly = QVBoxLayout(w)
-        ly.setContentsMargins(24, 20, 24, 16)
-        ly.setSpacing(12)
+        ly.setContentsMargins(T.SP_3XL, T.SP_2XL, T.SP_3XL, T.SP_2XL)
+        ly.setSpacing(T.SP_XL)
 
-        t = QLabel("任务编辑器")
-        t.setStyleSheet("font-size:18px; font-weight:bold; color:{C_TEXT};")
-        ly.addWidget(t)
-        ly.addWidget(QLabel("无需写代码，点击屏幕即可创建自动化。"))
+        # Title section
+        ly.addWidget(page_title("任务编辑器"))
+        ly.addWidget(page_subtitle("无需写代码，点击屏幕即可创建自动化任务。"))
 
-        nm = QHBoxLayout()
-        nm.addWidget(QLabel("任务名称:"))
+        ly.addSpacing(T.SP_LG)
+
+        # Form card
+        self._editor_card = QWidget()
+        self._editor_card.setStyleSheet(f"""
+            background: {T.CARD};
+            border: none;
+            border-radius: {T.R_LG}px;
+        """)
+        fc_ly = QVBoxLayout(self._editor_card)
+        fc_ly.setContentsMargins(T.SP_XL, T.SP_XL, T.SP_XL, T.SP_XL)
+        fc_ly.setSpacing(T.SP_LG)
+
+        # Task name
+        fc_ly.addWidget(section_title("任务名称"))
         self.ed_name = QComboBox()
         self.ed_name.setEditable(True)
-        self.ed_name.addItem("")
-        nm.addWidget(self.ed_name, 1)
-        ly.addLayout(nm)
+        self.ed_name.setStyleSheet(f"""
+            QComboBox {{
+                background: {T.GREEN_BG};
+                color: {T.GREEN};
+                border: 1px solid {T.GREEN}22;
+                border-radius: {T.R_SM}px;
+                padding: 5px 14px;
+                min-height: 32px;
+                max-height: 32px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox:hover {{
+                background: {T.GREEN_BG};
+                border: 1px solid {T.GREEN}44;
+            }}
+        """)
+        fc_ly.addWidget(self.ed_name)
 
+        # Steps list        # Steps list
+        fc_ly.addWidget(section_title("步骤"))
         self.ed_list = QTextEdit()
         self.ed_list.setReadOnly(True)
-        self.ed_list.setMaximumHeight(180)
-        self.ed_list.setFont(QFont("Consolas", 10))
-        self.ed_list.setStyleSheet(f"background:{C_CARD}; color:{C_TEXT}; border:1px solid {C_BORDER}; border-radius:4px; padding:8px;")
-        ly.addWidget(self.ed_list)
+        self.ed_list.setMaximumHeight(200)
+        self.ed_list.setFont(QFont("Cascadia Code,Consolas,monospace", 10))  # ← 自定义编辑器等宽字体
+        self.ed_list.setStyleSheet(f"""
+            background: {T.SURFACE};
+            color: {T.TEXT};
+            border: 1px solid {T.LINE};
+            border-radius: {T.R_MD}px;
+            padding: 14px;
+            font-size: 12px;
+        """)
+        fc_ly.addWidget(self.ed_list)
 
-        btn_row = QHBoxLayout()
-        for label, action in [("+ 点击操作","click"), ("+ 按键操作","press"), ("+ 等待","wait"), ("+ 等待出现","wait_until")]:
-            b = QPushButton(label)
-            b.clicked.connect(lambda _, a=action: self._ed_add(a))
-            btn_row.addWidget(b)
-        btn_row.addStretch()
-        ly.addLayout(btn_row)
+        # Step action buttons
+        row = QHBoxLayout()
+        row.setSpacing(T.SP_SM)
+        for text, action in [("+ 点击", "click"), ("+ 按键", "press"),
+                             ("+ 等待", "wait"), ("+ 等到", "wait_until")]:
+            b = btn_ghost(text)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda checked, a=action: self._ed_add(a))
+            row.addWidget(b)
+        row.addStretch()
+        row.addStretch()
+        fc_ly.addLayout(row)
 
-        ctrl = QHBoxLayout()
-        ctrl.addWidget(QPushButton("删除最后一步", clicked=self._ed_del))
-        ctrl.addWidget(QPushButton("清空全部", clicked=self._ed_clr))
-        ctrl.addStretch()
-
-        loop_row = QHBoxLayout()
-        loop_row.addWidget(QLabel("重复次数:"))
+        # Loop count
+        lr = QHBoxLayout()
+        lr.setSpacing(T.SP_SM)
+        loop_label = QLabel("循环")
+        loop_label.setStyleSheet(f"font-size:13px; font-weight:700; color:{T.TEXT};")
+        lr.addWidget(loop_label)
         self.ed_loop = QSpinBox()
         self.ed_loop.setRange(1, 9999)
         self.ed_loop.setValue(1)
-        loop_row.addWidget(self.ed_loop)
-        loop_row.addWidget(QLabel("次"))
-        loop_row.addStretch()
-        ly.addLayout(loop_row)
-        ly.addLayout(ctrl)
+        self.ed_loop.setFixedWidth(80)
+        self.ed_loop.setStyleSheet(f"""
+            QSpinBox {{
+                background: {T.GREEN_BG};
+                color: {T.GREEN};
+                border: 1px solid {T.GREEN}22;
+                border-radius: {T.R_SM}px;
+                padding: 5px 14px;
+                min-height: 32px;
+                max-height: 32px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                border: none;
+                width: 20px;
+                background: transparent;
+            }}
+            QSpinBox:hover {{
+                border: 1px solid {T.GREEN}44;
+            }}
+        """)
+        lr.addWidget(self.ed_loop)
+        times_label = QLabel("次")
+        times_label.setStyleSheet(f"font-size:13px; font-weight:500; color:{T.TEXT2};")
+        lr.addWidget(times_label)
+        lr.addStretch()
+        fc_ly.addLayout(lr)
 
-        save_btn = QPushButton("保存任务")
-        save_btn.setMinimumHeight(36)
-        save_btn.setStyleSheet(f"background:{C_ACCENT}; color:white; border:none; border-radius:4px; font-size:14px; font-weight:bold;")
-        save_btn.clicked.connect(self._ed_save)
-        ly.addWidget(save_btn)
+        # Delete / Clear row
+        cr = QHBoxLayout()
+        cr.setSpacing(T.SP_SM)
+        del_btn = btn_ghost("删最后")
+        del_btn.clicked.connect(self._ed_del)
+        cr.addWidget(del_btn)
+        clr_btn = btn_ghost("清空")
+        clr_btn.clicked.connect(self._ed_clr)
+        cr.addWidget(clr_btn)
+        cr.addStretch()
+        fc_ly.addLayout(cr)
+
+        ly.addWidget(self._editor_card)
+
+        # Save button (full width)
+        save = btn_primary("保存任务")
+        save.setMinimumHeight(40)
+        save.clicked.connect(self._ed_save)
+        ly.addWidget(save)
+
         ly.addStretch()
         return w
 
-    # ── Editor logic ──
+    # ══════════════════════════════════════
+    #  PAGE: 关于
+    # ══════════════════════════════════════
+
+    def _about_content(self):
+        w = QWidget()
+        w.setStyleSheet(f"background:{T.BG};")
+        ly = QVBoxLayout(w)
+        ly.setContentsMargins(T.SP_3XL, T.SP_2XL, T.SP_3XL, T.SP_2XL)
+        ly.setSpacing(T.SP_LG)
+
+        # Brand card
+        self._about_card = QWidget()
+        self._about_card.setStyleSheet(f"""
+            background: {T.CARD};
+            border: none;
+            border-radius: {T.R_XL}px;
+        """)
+        br_ly = QVBoxLayout(self._about_card)
+        br_ly.setContentsMargins(T.SP_2XL, T.SP_3XL, T.SP_2XL, T.SP_3XL)
+        br_ly.setSpacing(T.SP_LG)
+        br_ly.setAlignment(Qt.AlignCenter)
+
+        # Logo icon area
+        self._about_icon = QLabel("\u2699")
+        self._about_icon.setStyleSheet(f"""
+            font-size: 48px;  /* ← 自定义关于页品牌大字 */
+            color: {T.ACCENT};
+            background: transparent;
+        """)
+        self._about_icon.setAlignment(Qt.AlignCenter)
+        br_ly.addWidget(self._about_icon)
+
+        self._about_title = QLabel("SmartRPA")
+        self._about_title.setAlignment(Qt.AlignCenter)
+        self._about_title.setStyleSheet(f"""
+            font-size: 28px;  /* ← 自定义关于页版本号 */
+            font-weight: 800;
+            color: {T.TEXT};
+            letter-spacing: -1px;
+        """)
+        br_ly.addWidget(self._about_title)
+
+        self._about_desc = QLabel("视觉驱动的智能桌面自动化程序")
+        self._about_desc.setAlignment(Qt.AlignCenter)
+        self._about_desc.setStyleSheet(f"color:{T.TEXT2}; font-size:15px;")
+        br_ly.addWidget(self._about_desc)
+
+        self._about_ver = QLabel("v0.1.0")
+        self._about_ver.setAlignment(Qt.AlignCenter)
+        self._about_ver.setStyleSheet(f"""
+            color: {T.ACCENT};
+            font-size: 13px;
+            font-weight: 600;
+            padding: 4px 16px;
+            background: {T.ACCENT_DIM};
+            border-radius: {T.R_SM}px;
+        """)
+        br_ly.addWidget(self._about_ver)
+
+        br_ly.addSpacing(T.SP_XL)
+
+        self._about_tech = QLabel("Python  \u00B7  OpenCV  \u00B7  PySide6  \u00B7  Tesseract OCR")
+        self._about_tech.setAlignment(Qt.AlignCenter)
+        self._about_tech.setStyleSheet(f"color:{T.TEXT3}; font-size:12px; letter-spacing:0.5px;")
+        br_ly.addWidget(self._about_tech)
+
+        ly.addWidget(self._about_card)
+        ly.addStretch()
+        return w
+
+    # ══════════════════════════════════════
+    #  Editor Logic (unchanged)
+    # ══════════════════════════════════════
 
     def _ed_add(self, action):
         name = self.ed_name.currentText().strip()
         if not name:
-            self._log_append("请先输入任务名称", "WARN"); return
+            self.log_msg("请先输入任务名称", "WARN")
+            return
         if action == "press":
-            k, ok = QInputDialog.getText(self, "按键", "按键名 (up/down/enter/f/space):")
+            k, ok = QInputDialog.getText(self, "按键", "按键名:")
             if ok and k.strip():
-                self._editor_steps.append((k.strip(),0,0,0,0,"press"))
+                self._ed.append((k.strip(), 0, 0, 0, 0, "press"))
                 self._ed_refresh()
             return
         if action == "wait":
-            s, ok = QInputDialog.getDouble(self, "等待", "秒数:", 2.0, 0.1, 60, 1)
+            s, ok = QInputDialog.getDouble(self, "等待", "秒:", 2.0, 0.1, 60, 1)
             if ok:
-                self._editor_steps.append((f"{s:.1f}秒",0,0,0,0,"wait"))
+                self._ed.append((f"{s:.1f}秒", 0, 0, 0, 0, "wait"))
                 self._ed_refresh()
             return
         if action == "wait_until":
-            self.setWindowState(Qt.WindowMinimized)
-            dlg = RegionSelector()
-            if dlg.exec() and dlg.region:
-                x,y,w,h = dlg.region
-                self._snap_tpl(name, f"wait_{len(self._editor_steps)+1}", x,y,w,h)
-                timeout, ok = QInputDialog.getInt(self, "超时", "最大等待秒:", 60, 1, 600, 1)
+            self.showMinimized()
+            d = RegionSelector()
+            if d.exec() and d.region:
+                x, y, w, h = d.region
+                self._snap(name, f"wait_{len(self._ed)+1}", x, y, w, h)
+                t, ok = QInputDialog.getInt(self, "超时", "最大秒:", 60, 1, 600, 1)
                 if ok:
-                    self._editor_steps.append((f"wait_{len(self._editor_steps)+1}",x,y,w,h,"wait_until"))
+                    self._ed.append((f"wait_{len(self._ed)+1}", x, y, w, h, "wait_until"))
                     self._ed_refresh()
-            self.setWindowState(Qt.WindowNoState)
+            self.showNormal()
             return
-        self.setWindowState(Qt.WindowMinimized)
-        dlg = RegionSelector()
-        if dlg.exec() and dlg.region:
-            x,y,w,h = dlg.region
-            tpl_name = f"step{len(self._editor_steps)+1}"
-            self._snap_tpl(name, tpl_name, x,y,w,h)
-            self._editor_steps.append((tpl_name,x,y,w,h,"click"))
+        # click
+        self.showMinimized()
+        d = RegionSelector()
+        if d.exec() and d.region:
+            x, y, w, h = d.region
+            tpl = f"s{len(self._ed)+1}"
+            self._snap(name, tpl, x, y, w, h)
+            self._ed.append((tpl, x, y, w, h, "click"))
             self._ed_refresh()
-        self.setWindowState(Qt.WindowNoState)
+        self.showNormal()
 
-    def _snap_tpl(self, task_name, tpl_name, x, y, w, h):
-        import mss, cv2
-        d = os.path.join(os.path.dirname(__file__), "examples", task_name, "templates")
+    def _snap(self, task, tpl, x, y, w, h):
+        import mss as _m, cv2 as _c
+        d = os.path.join(os.path.dirname(__file__), "examples", task, "templates")
         os.makedirs(d, exist_ok=True)
-        with mss.mss() as sct:
-            img = sct.grab({"left":x,"top":y,"width":w,"height":h})
-            cv2.imwrite(os.path.join(d, f"{tpl_name}.png"),
-                        cv2.cvtColor(np.array(img), cv2.COLOR_BGRA2BGR))
+        with _m.mss() as sct:
+            img = sct.grab({"left": x, "top": y, "width": w, "height": h})
+            _c.imwrite(
+                os.path.join(d, f"{tpl}.png"),
+                _c.cvtColor(np.array(img), _c.COLOR_BGRA2BGR)
+            )
 
     def _ed_refresh(self):
         self.ed_list.clear()
-        for i, s in enumerate(self._editor_steps):
-            name, x, y, w, h, a = s
-            cn = {"click":"点击","press":"按键","wait":"等待","wait_until":"等待出现"}.get(a,a)
+        cm = {"click": "点", "press": "按键", "wait": "等待", "wait_until": "等到"}
+        for i, s in enumerate(self._ed):
+            n, _, _, _, _, a = s
+            c = cm.get(a, a)
             if a == "wait":
-                self.ed_list.append(f'<span style="color:{C_WARN}">[{i+1}] 等待 {name}</span>')
+                self.ed_list.append(f"  [{i+1}] 等待 {n}")
             elif a == "press":
-                self.ed_list.append(f'<span style="color:{C_WARN}">[{i+1}] 按 {name} 键</span>')
-            elif a == "wait_until":
-                self.ed_list.append(f'<span style="color:{C_WARN}">[{i+1}] {cn}</span>  "{name}"')
+                self.ed_list.append(f"  [{i+1}] 按 {n}")
             else:
-                self.ed_list.append(f'<span style="color:{C_ACCENT}">[{i+1}] {cn}</span>  "{name}" ({x},{y} {w}x{h})')
+                self.ed_list.append(f"  [{i+1}] {c} {n}")
 
     def _ed_del(self):
-        if self._editor_steps: self._editor_steps.pop(); self._ed_refresh()
+        if self._ed:
+            self._ed.pop()
+            self._ed_refresh()
+
     def _ed_clr(self):
-        self._editor_steps.clear(); self._ed_refresh()
+        self._ed.clear()
+        self._ed_refresh()
 
     def _ed_save(self):
         name = self.ed_name.currentText().strip()
-        if not name: self._log_append("请输入任务名称", "WARN"); return
-        if not self._editor_steps: self._log_append("请至少添加一个步骤", "WARN"); return
+        if not name:
+            self.log_msg("请输入任务名称", "WARN")
+            return
+        if not self._ed:
+            self.log_msg("请至少添加一个步骤", "WARN")
+            return
         d = os.path.join(os.path.dirname(__file__), "examples", name)
         os.makedirs(d, exist_ok=True)
         tasks, loop = {}, self.ed_loop.value()
-        for i, s in enumerate(self._editor_steps):
+        for i, s in enumerate(self._ed):
             tpl, x, y, w, h, a = s
             sid = f"Step{i+1}"
-            e = {"desc": f"步骤{i+1}: {a}"}
+            e = {"desc": f"步骤{i+1}"}
             if a == "wait":
-                e["action"]="wait"; e["params"]={"seconds": float(tpl.replace("秒",""))}
+                e["action"] = "wait"
+                e["params"] = {"seconds": float(tpl.replace("秒", ""))}
             elif a == "press":
-                e["action"]="press"; e["params"]={"key": tpl}
+                e["action"] = "press"
+                e["params"] = {"key": tpl}
             elif a == "wait_until":
-                e["action"]="wait_until"; e["params"]={"template":tpl,"threshold":0.8,"timeout":60}
+                e["action"] = "wait_until"
+                e["params"] = {"template": tpl, "threshold": 0.8, "timeout": 60}
             elif a == "click":
-                e["action"]="click"; e["params"]={"template":tpl,"threshold":0.8}
-            if i < len(self._editor_steps)-1:
-                e["next"]=[f"Step{i+2}"]
+                e["action"] = "click"
+                e["params"] = {"template": tpl, "threshold": 0.8}
+            if i < len(self._ed) - 1:
+                e["next"] = [f"Step{i+2}"]
             elif loop > 1:
-                e["next"]=["Step1"]
+                e["next"] = ["Step1"]
             tasks[sid] = e
-        if loop > 1 and "Step1" in tasks: tasks["Step1"]["maxTimes"] = loop
+        if loop > 1 and "Step1" in tasks:
+            tasks["Step1"]["maxTimes"] = loop
         with open(os.path.join(d, "task.json"), "w", encoding="utf-8") as f:
             json.dump(tasks, f, ensure_ascii=False, indent=2)
-        self._log_append(f"已保存: {d}/task.json", "SUCCESS")
+        self.log_msg(f"已保存: {d}/task.json", "SUCCESS")
         self._scan()
 
-    # ── Settings ──
-
-    def _page_settings(self):
-        w = QWidget()
-        ly = QVBoxLayout(w)
-        ly.setContentsMargins(24, 20, 24, 16)
-        ly.setSpacing(16)
-        t = QLabel("设置")
-        t.setStyleSheet("font-size:18px; font-weight:bold; color:{C_TEXT};")
-        ly.addWidget(t)
-        ly.addWidget(QLabel("SmartRPA 配置项将在此处显示。"))
-        ly.addStretch()
-        return w
-
-    def _page_about(self):
-        w = QWidget()
-        ly = QVBoxLayout(w)
-        ly.setContentsMargins(24, 20, 24, 16)
-        ly.setSpacing(12)
-        t = QLabel("关于 SmartRPA")
-        t.setStyleSheet("font-size:18px; font-weight:bold; color:{C_TEXT};")
-        ly.addWidget(t)
-        ly.addWidget(QLabel("SmartRPA - 视觉驱动的智能桌面自动化"))
-        ly.addWidget(QLabel("版本 0.1.0"))
-        ly.addWidget(QLabel("技术栈: Python + OpenCV + PySide6 + Tesseract OCR"))
-        ly.addWidget(QLabel("灵感来源: MAA (MaaAssistantArknights)"))
-        ly.addStretch()
-        return w
-
-    # ── Tasks page logic ──
+    # ══════════════════════════════════════
+    #  Tasks Logic (unchanged)
+    # ══════════════════════════════════════
 
     def _scan(self):
         self._task_map.clear()
         self.task_combo.clear()
-        examples = os.path.join(os.path.dirname(__file__), "examples")
-        if not os.path.isdir(examples): return
-        for d in sorted(os.listdir(examples)):
-            fp = os.path.join(examples, d, "task.json")
+        ex = os.path.join(os.path.dirname(__file__), "examples")
+        if not os.path.isdir(ex):
+            return
+        for d in sorted(os.listdir(ex)):
+            fp = os.path.join(ex, d, "task.json")
             if os.path.exists(fp):
                 self._task_map[d] = fp
                 self.task_combo.addItem(d)
 
     def _on_task_changed(self):
         path = self._task_map.get(self.task_combo.currentText())
-        if not path: return
-        # Clear old checkboxes
-        for cb in self._checkboxes.values():
-            self.task_list_layout.removeWidget(cb); cb.deleteLater()
-        self._checkboxes.clear()
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for name, task in data.items():
-                if name.startswith("_"): continue
-                cb = QCheckBox(task.get("desc", name))
-                cb.setChecked(True)
-                self._checkboxes[name] = cb
-                self.task_list_layout.addWidget(cb)
-        except Exception as e:
-            self.task_combo.setToolTip(f"Error: {e}")
+        if not path:
+            return
         tpl = os.path.join(os.path.dirname(path), "templates")
-        if os.path.isdir(tpl): self.tpl_combo.setCurrentText(tpl)
+        if os.path.isdir(tpl):
+            self.tpl_combo.setCurrentText(tpl)
 
     def _select_region(self):
         self.showMinimized()
-        dlg = RegionSelector()
-        if dlg.exec() and dlg.region:
-            self._region = dlg.region
+        d = RegionSelector()
+        if d.exec() and d.region:
+            self._region = d.region
             x, y, w, h = self._region
-            self.region_lbl.setText(f"{x}, {y}  {w}x{h}")
-            self.region_lbl.setStyleSheet(f"color:{C_SUCCESS}; padding:4px 8px; background:{C_CARD}; border-radius:3px;")
-        else:
-            self.region_lbl.setText("已取消")
+            self.region_lbl.setText(f"{x},{y}  {w}x{h}")
+            self.region_lbl.setStyleSheet(f"""
+                color: {T.GREEN};
+                font-size: 12px;
+                font-weight: 600;
+                padding: 5px 14px;
+                min-height: 32px;
+                max-height: 32px;
+                background: {T.GREEN_BG};
+                border-radius: {T.R_SM}px;
+                border: 1px solid {T.GREEN}22;
+            """)
         self.showNormal()
 
     def _browse_tpl(self):
         d = QFileDialog.getExistingDirectory(self, "选择模板目录")
-        if d: self.tpl_combo.setCurrentText(d)
+        if d:
+            self.tpl_combo.setCurrentText(d)
 
     def _start(self):
         path = self._task_map.get(self.task_combo.currentText())
         if not path or not os.path.exists(path):
-            self._log_append("未选择有效任务", "ERROR"); return
+            self.log_msg("未选择有效任务", "ERROR")
+            return
         self._running = True
-        self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+        self.run_btn.setText("\u25A0  停止")
+        self._update_run_btn_style()
         self.progress.show()
-        self.worker = TaskWorker(path, self.tpl_combo.currentText() or None,
-                                 not self.popup_cb.isChecked(), self._region)
-        self.worker.log.connect(self._log_append)
-        self.worker.task_changed.connect(lambda d: self.task_hint.setText(d))
+
+        self.pulse_dot.set_color(T.ACCENT)
+        self.pulse_dot.start_pulse()
+        self.state_lbl.setText("运行中")
+        self.state_lbl.setStyleSheet(f"color:{T.ACCENT2}; font-size:12px; font-weight:600; padding: 0 8px 0 4px;")  # ← 自定义运行中文字字号
+
+        self.worker = TaskWorker(
+            path, self.tpl_combo.currentText() or None,
+            not self.popup_cb.isChecked(), self._region
+        )
+        self.worker.log.connect(self.log_msg)
         self.worker.finished.connect(self._done)
         self.showMinimized()
         self.worker.start()
 
+    def _on_step(self, desc):
+        self.status_lbl.setText(f" {desc}")
+
     def _stop(self):
-        if self.worker: self.worker.stop()
+        if self.worker:
+            self.worker.stop()
         self.showNormal()
-        self._log_append("已停止", "WARN")
+        self._reset()
+        self.log_msg("已停止", "WARN")
 
     def _done(self, stats):
         self.showNormal()
         self._reset()
-        self._log_append(f"完成: {stats['steps']}步, {stats['popups_handled']}弹窗, {stats['errors']}错误", "SUCCESS")
+        self.log_msg(
+            f"完成: {stats['steps']}步 {stats['popups_handled']}弹窗 {stats['errors']}错误",
+            "SUCCESS"
+        )
+        self.status_lbl.setText(f" 完成 — {stats['steps']}步骤")
 
     def _reset(self):
         self._running = False
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
+        self.run_btn.setText("\u25B6  开始运行")
+        self._update_run_btn_style()
         self.progress.hide()
-        self.task_hint.setText("")
+        self.pulse_dot.stop_pulse()
+        self.pulse_dot.set_color(T.TEXT3)
+        self.state_lbl.setText("就绪")
+        self.state_lbl.setStyleSheet(f"color:{T.TEXT2}; font-size:12px; font-weight:500; padding: 0 8px 0 4px;")  # ← 自定义状态文字字号（就绪）
 
-    def _log_append(self, msg, level="INFO"):
-        cols = {"INFO": C_ACCENT, "SUCCESS": C_SUCCESS, "WARN": C_WARN, "ERROR": C_ERROR}
-        c = cols.get(level, C_TEXT)
-        self.log_widget.append(f'<span style="color:{c}">[{level[:4]}]</span> {msg}')
+    def log_msg(self, msg, level="INFO"):
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        colors = {
+            "INFO":    T.BLUE,
+            "SUCCESS": T.GREEN,
+            "WARN":    T.ORANGE,
+            "ERROR":   T.RED,
+        }
+        c = colors.get(level, T.TEXT)
+        self.log.append(
+            f'<span style="color:{T.TEXT3}">{ts}</span> '
+            f'<span style="color:{c}; font-weight:600;">[{level}]</span> '
+            f'<span style="color:{T.LOG_TEXT}">{msg}</span>'
+        )
 
 
-class QHLine(QFrame):
-    def __init__(self):
-        super().__init__()
-        self.setFrameShape(QFrame.HLine)
-        self.setStyleSheet(f"color:{C_BORDER};")
-
+# ═══════════════════════════════════════════════
+#  Entry Point
+# ═══════════════════════════════════════════════
 
 def main():
     app = QApplication(sys.argv)
+    app.setFont(QFont("Microsoft YaHei", 10))  # ← 自定义全局后备字体（影响所有控件默认字号）
     app.setStyle("Fusion")
-    app.setStyleSheet(STYLE)
-    w = SmartRPAGUI()
-    w.show()
+    app.setStyleSheet(build_base_qss())
+    SmartRPAGUI().show()
     sys.exit(app.exec())
 
 

@@ -1,9 +1,45 @@
 """2048 AI 回调 — Tesseract OCR 数字识别（不依赖颜色，适配任何主题）"""
+import os
+import shutil
 import numpy as np
 import cv2
 import pytesseract
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+def _find_tesseract():
+    """自动检测 Tesseract OCR 安装路径"""
+    # 1) 环境变量
+    env_path = os.environ.get("TESSERACT_PATH")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    # 2) 系统 PATH
+    which = shutil.which("tesseract")
+    if which:
+        return which
+
+    # 3) 常见安装路径
+    candidates = [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        "/usr/bin/tesseract",
+        "/usr/local/bin/tesseract",
+        "/opt/homebrew/bin/tesseract",
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+
+    # 4) 都没找到 → 抛出可操作的错误提示
+    raise RuntimeError(
+        "未找到 Tesseract OCR。请执行以下任一操作：\n"
+        "  1. 安装 Tesseract: https://github.com/UB-Mannheim/tesseract/wiki\n"
+        "  2. 设置环境变量: set TESSERACT_PATH=C:\\Path\\To\\tesseract.exe\n"
+        "  3. 将 tesseract 所在目录添加到系统 PATH 中"
+    )
+
+
+pytesseract.pytesseract.tesseract_cmd = _find_tesseract()
 
 TESSER_CONF = "--psm 7 -c tessedit_char_whitelist=0123456789"
 

@@ -3,12 +3,52 @@
 """
 import sys
 import os
+import json
 import numpy as np
 
 # 添加项目根目录
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from smartrpa import Controller, Vision, TaskEngine, PopupHandler
+
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "game_config.json")
+
+
+def load_config():
+    """读取配置文件，不存在则返回默认值"""
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return {"board_region": [400, 200, 400, 400]}
+
+
+def save_config(board_region):
+    """保存配置到文件"""
+    config = load_config()
+    config["board_region"] = board_region
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print(f"配置已保存到 {CONFIG_PATH}")
+
+
+def setup_region():
+    """交互式配置棋盘区域"""
+    print("\n--- 配置棋盘区域 ---")
+    print("请打开2048游戏窗口，记录棋盘在屏幕上的位置。")
+    print("可以用截图工具测量，或使用 mss 的 screen 输出辅助确定坐标。\n")
+    try:
+        x = int(input("棋盘左上角 X 坐标: ").strip())
+        y = int(input("棋盘左上角 Y 坐标: ").strip())
+        w = int(input("棋盘宽度: ").strip())
+        h = int(input("棋盘高度: ").strip())
+        region = (x, y, w, h)
+        save_config(list(region))
+        return region
+    except (ValueError, EOFError):
+        print("输入无效，使用默认值 (400, 200, 400, 400)")
+        return (400, 200, 400, 400)
 
 # ========== 2048方块颜色表（BGR格式） ==========
 
@@ -144,11 +184,15 @@ def main():
     print("  SmartRPA - 2048 AI 自动化")
     print("=" * 50)
 
-    # 棋盘区域（需要根据实际游戏位置调整）
-    # 用截图工具获取棋盘在屏幕上的位置
-    board_region = (400, 200, 400, 400)  # (x, y, w, h)
+    # 检测 --setup 参数
+    if "--setup" in sys.argv:
+        board_region = setup_region()
+    else:
+        config = load_config()
+        board_region = tuple(config.get("board_region", [400, 200, 400, 400]))
+
     print(f"\n棋盘区域: {board_region}")
-    print("如果游戏位置不同，请修改 run.py 中的 board_region 变量")
+    print("使用 --setup 参数重新配置: python run.py --setup")
 
     # 初始化组件
     controller = Controller()
