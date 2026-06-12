@@ -31,6 +31,16 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+
+def resource_path(relative_path):
+    """Get absolute path for bundled resources (dev / PyInstaller frozen)."""
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QCheckBox, QComboBox, QFileDialog,
@@ -40,9 +50,9 @@ from PySide6.QtWidgets import (
     QStackedWidget, QGraphicsDropShadowEffect
 )
 from PySide6.QtCore import Qt, QThread, Signal, QRect, QTimer, QSettings
-from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient
+from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon
 
-from smartrpa import Controller, Vision, TaskEngine, PopupHandler
+from smartrpa import Controller, Vision, TaskEngine, PopupHandler, __version__
 from callback_2048 import callback_2048
 
 
@@ -101,12 +111,20 @@ class Theme:
     @property
     def BLUE_BG(self):     return "#eff6ff" if self.mode == "light" else "#1a2540"
 
+    # ── Text colors: 6 independent values (light/dark pair) ──
+    TEXT_LIGHT  = "#1d1d1f"    # 主文本
+    TEXT2_LIGHT = "#4a4a5a"    # 次要文本
+    TEXT3_LIGHT = "#7a7a82"    # 三级/弱文本
+    TEXT_DARK   = "#e8eaf0"    # 主文本
+    TEXT2_DARK  = "#b0b4c0"    # 次要文本
+    TEXT3_DARK  = "#8c90a0"    # 改为浅灰，暗背景清晰可见
+
     @property
-    def TEXT(self):        return "#1d1d1f" if self.mode == "light" else "#e8eaf0"
+    def TEXT(self):   return self.TEXT_LIGHT if self.mode == "light" else self.TEXT_DARK
     @property
-    def TEXT2(self):       return "#6e6e73" if self.mode == "light" else "#8b8fa8"
+    def TEXT2(self):  return self.TEXT2_LIGHT if self.mode == "light" else self.TEXT2_DARK
     @property
-    def TEXT3(self):       return "#aeaeb2" if self.mode == "light" else "#555872"
+    def TEXT3(self):  return self.TEXT3_LIGHT if self.mode == "light" else self.TEXT3_DARK
 
     @property
     def LINE(self):       return "#e2e2e8" if self.mode == "light" else "#252536"
@@ -720,6 +738,7 @@ class SmartRPAGUI(QMainWindow):
         self._build()
         self._scan()
         self.setWindowTitle("SmartRPA")
+        self.setWindowIcon(QIcon(resource_path("SmartRPA.ico")))
         self.resize(1160, 760)
         self.setMinimumSize(940, 600)
 
@@ -787,7 +806,7 @@ class SmartRPAGUI(QMainWindow):
         rc_ly.addWidget(self.theme_switch)
 
         # Version
-        self._ver_label = QLabel("v0.1.0")
+        self._ver_label = QLabel(f"v{__version__}")
         self._ver_label.setStyleSheet(f"""
             font-size: 11px;
             color: {T.TEXT3};
@@ -1044,6 +1063,14 @@ class SmartRPAGUI(QMainWindow):
             padding: 14px;
             font-size: 12px;
         """)
+
+        # Page title & subtitle
+        for label in self._editor_page.findChildren(QLabel):
+            txt = label.text()
+            if txt == "任务编辑器":
+                label.setStyleSheet(f"font-size:24px; font-weight:700; color:{T.TEXT}; letter-spacing:-0.5px;")
+            elif txt == "无需写代码，点击屏幕即可创建自动化任务。":
+                label.setStyleSheet(f"font-size:14px; color:{T.TEXT2}; font-weight:400;")
 
     def _refresh_about_styles(self):
         """Refresh the about page inline styles."""
@@ -1474,7 +1501,7 @@ class SmartRPAGUI(QMainWindow):
         self._about_desc.setStyleSheet(f"color:{T.TEXT2}; font-size:15px;")
         br_ly.addWidget(self._about_desc)
 
-        self._about_ver = QLabel("v0.1.0")
+        self._about_ver = QLabel(f"v{__version__}")
         self._about_ver.setAlignment(Qt.AlignCenter)
         self._about_ver.setStyleSheet(f"""
             color: {T.ACCENT};

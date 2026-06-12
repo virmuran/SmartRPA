@@ -29,3 +29,7 @@ task_state.json
 screenshots/
 *.png.log
 !examples/*/templates/*.png
+
+build_ico.py
+build.bat
+SmartRPA.png
