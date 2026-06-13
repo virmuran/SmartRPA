@@ -47,10 +47,12 @@ from PySide6.QtWidgets import (
     QTextEdit, QProgressBar,
     QFrame, QSplitter, QScrollArea, QDialog,
     QInputDialog, QSpinBox, QStatusBar, QSizePolicy,
-    QStackedWidget, QGraphicsDropShadowEffect
+    QStackedWidget, QGraphicsDropShadowEffect,
+    QListWidget, QListWidgetItem, QAbstractItemView,
+    QSystemTrayIcon, QMenu, QDateTimeEdit,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QRect, QTimer, QSettings
-from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon
+from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon, QPixmap
 
 from smartrpa import Controller, Vision, TaskEngine, PopupHandler, __version__
 from callback_2048 import callback_2048
@@ -737,6 +739,10 @@ class SmartRPAGUI(QMainWindow):
         T.apply(saved)
         self._build()
         self._scan()
+        # Restore schedule preference
+        sched_enabled = self._settings.value("schedule/enabled", "false") == "true"
+        if hasattr(self, 'sched_cb'):
+            self.sched_cb.setChecked(sched_enabled)
         self.setWindowTitle("SmartRPA")
         self.setWindowIcon(QIcon(resource_path("SmartRPA.ico")))
         self.resize(1160, 760)
@@ -852,6 +858,24 @@ class SmartRPAGUI(QMainWindow):
         self.setStatusBar(self.status)
 
         root.addWidget(self.right_widget, 1)
+
+        # ── Schedule Timer ──
+        self.sched_timer = QTimer(self)
+        self.sched_timer.timeout.connect(self._check_schedule)
+        self.sched_timer.start(30000)
+
+        # ── System Tray ──
+        self._tray = QSystemTrayIcon(self)
+        self._tray.setIcon(QIcon(resource_path("SmartRPA.ico")))
+        self._tray.setToolTip("SmartRPA")
+        tray_menu = QMenu()
+        show_action = tray_menu.addAction("显示窗口")
+        show_action.triggered.connect(self.showNormal)
+        quit_action = tray_menu.addAction("退出")
+        quit_action.triggered.connect(QApplication.quit)
+        self._tray.setContextMenu(tray_menu)
+        self._tray.activated.connect(lambda reason: self.showNormal() if reason == QSystemTrayIcon.DoubleClick else None)
+        self._tray.show()
 
     # ── Theme Toggle ──
 
@@ -999,70 +1023,21 @@ class SmartRPAGUI(QMainWindow):
         """Refresh the editor page inline styles."""
         self._editor_page.setStyleSheet(f"background:{T.BG};")
 
-        # Editor card
-        if hasattr(self, '_editor_card'):
-            self._editor_card.setStyleSheet(f"""
-                background: {T.CARD};
-                border: none;
-                border-radius: {T.R_LG}px;
-            """)
-
         # Editor name combo
         if hasattr(self, 'ed_name'):
-            self.ed_name.setStyleSheet(f"""
-                QComboBox {{
-                    background: {T.GREEN_BG};
-                    color: {T.GREEN};
-                    border: 1px solid {T.GREEN}22;
-                    border-radius: {T.R_SM}px;
-                    padding: 5px 14px;
-                    min-height: 32px;
-                    max-height: 32px;
-                    font-weight: 600;
-                    font-size: 12px;
-                }}
-                QComboBox::drop-down {{
-                    border: none;
-                    width: 24px;
-                }}
-                QComboBox:hover {{
-                    background: {T.GREEN_BG};
-                    border: 1px solid {T.GREEN}44;
-                }}
-            """)
+            self.ed_name.setStyleSheet(f"""QComboBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QComboBox::drop-down{{border:none;width:24px;}}QComboBox:hover{{background:{T.GREEN_BG};border:1px solid {T.GREEN}44;}}""")
+
+        # Editor steps list
+        if hasattr(self, 'ed_list'):
+            self.ed_list.setStyleSheet(f"""QListWidget{{background:{T.SURFACE};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_MD}px;padding:8px;font-size:12px;outline:none;}}QListWidget::item{{padding:6px 10px;border-radius:4px;}}QListWidget::item:selected{{background:{T.ACCENT_DIM};color:{T.TEXT};}}QListWidget::item:hover{{background:{T.CARD_HOVER};}}""")
 
         # Editor loop spinbox
         if hasattr(self, 'ed_loop'):
-            self.ed_loop.setStyleSheet(f"""
-                QSpinBox {{
-                    background: {T.GREEN_BG};
-                    color: {T.GREEN};
-                    border: 1px solid {T.GREEN}22;
-                    border-radius: {T.R_SM}px;
-                    padding: 5px 14px;
-                    min-height: 32px;
-                    max-height: 32px;
-                    font-weight: 600;
-                    font-size: 12px;
-                }}
-                QSpinBox::up-button, QSpinBox::down-button {{
-                    border: none;
-                    width: 20px;
-                    background: transparent;
-                }}
-                QSpinBox:hover {{
-                    border: 1px solid {T.GREEN}44;
-                }}
-            """)
+            self.ed_loop.setStyleSheet(f"QSpinBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.GREEN}44;}}")
 
-        self.ed_list.setStyleSheet(f"""
-            background: {T.SURFACE};
-            color: {T.TEXT};
-            border: 1px solid {T.LINE};
-            border-radius: {T.R_MD}px;
-            padding: 14px;
-            font-size: 12px;
-        """)
+        # Preview label
+        if hasattr(self, '_ed_preview'):
+            self._ed_preview.setStyleSheet(f"background:{T.SURFACE};color:{T.TEXT3};border:1px solid {T.LINE};border-radius:{T.R_SM}px;font-size:11px;")
 
         # Page title & subtitle
         for label in self._editor_page.findChildren(QLabel):
@@ -1100,6 +1075,40 @@ class SmartRPAGUI(QMainWindow):
         self.content_stack.setCurrentIndex(idx)
         for i, btn in enumerate(self.nav_btns):
             btn.set_active(i == idx)
+
+    # ── Schedule ──
+
+    def _on_sched_toggle(self, enabled):
+        self._settings.setValue("schedule/enabled", enabled)
+        if enabled:
+            self._update_sched_next()
+        else:
+            self.sched_next.setText("")
+
+    def _calc_next_run(self):
+        from datetime import datetime, timedelta
+        if not self.sched_cb.isChecked():
+            return None
+        now = datetime.now()
+        if self.sched_combo.currentText() == "每小时":
+            return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        t = self.sched_time.time()
+        nxt = now.replace(hour=t.hour(), minute=t.minute(), second=0, microsecond=0)
+        return nxt + timedelta(days=1) if nxt <= now else nxt
+
+    def _update_sched_next(self):
+        nxt = self._calc_next_run()
+        self.sched_next.setText(f"下次运行: {nxt.strftime('%H:%M')}" if nxt else "")
+
+    def _check_schedule(self):
+        if not self.sched_cb.isChecked() or self._running:
+            self._update_sched_next()
+            return
+        from datetime import datetime
+        nxt = self._calc_next_run()
+        if nxt and datetime.now() >= nxt:
+            self.log_msg("定时触发: 自动开始运行", "INFO")
+            self._start()
 
     # ══════════════════════════════════════
     #  PAGE: 自动化任务 (3-column Bento)
@@ -1216,6 +1225,43 @@ class SmartRPAGUI(QMainWindow):
         self.popup_cb.setChecked(True)
         Cl.addWidget(self.popup_cb)
 
+        # ── Schedule ──
+        Cl.addWidget(section_title("定时"))
+        sch_row = QHBoxLayout()
+        sch_row.setSpacing(T.SP_SM)
+        self.sched_cb = QCheckBox("启用")
+        self.sched_cb.toggled.connect(self._on_sched_toggle)
+        sch_row.addWidget(self.sched_cb)
+        self.sched_combo = QComboBox()
+        self.sched_combo.addItems(["每天", "每小时"])
+        self.sched_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {T.GREEN_BG}; color: {T.GREEN};
+                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
+                padding: 3px 10px; min-height: 28px; max-height: 28px;
+                font-weight: 600; font-size: 11px;
+            }}
+            QComboBox::drop-down {{ border: none; width: 20px; }}
+        """)
+        sch_row.addWidget(self.sched_combo)
+        self.sched_time = QDateTimeEdit()
+        self.sched_time.setDisplayFormat("HH:mm")
+        self.sched_time.setTime(self.sched_time.time().fromString("09:00", "HH:mm"))
+        self.sched_time.setStyleSheet(f"""
+            QDateTimeEdit {{
+                background: {T.GREEN_BG}; color: {T.GREEN};
+                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
+                padding: 3px 10px; min-height: 28px; max-height: 28px;
+                font-weight: 600; font-size: 11px;
+            }}
+        """)
+        sch_row.addWidget(self.sched_time)
+        sch_row.addStretch()
+        Cl.addLayout(sch_row)
+        self.sched_next = QLabel("")
+        self.sched_next.setStyleSheet(f"font-size:11px; color:{T.TEXT3};")
+        Cl.addWidget(self.sched_next)
+
         Cl.addStretch(1)
 
         # Run / Stop toggle at bottom of config panel
@@ -1316,141 +1362,86 @@ class SmartRPAGUI(QMainWindow):
         w = QWidget()
         w.setStyleSheet(f"background:{T.BG};")
         ly = QVBoxLayout(w)
-        ly.setContentsMargins(T.SP_3XL, T.SP_2XL, T.SP_3XL, T.SP_2XL)
-        ly.setSpacing(T.SP_XL)
+        ly.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
+        ly.setSpacing(0)
 
-        # Title section
-        ly.addWidget(page_title("任务编辑器"))
-        ly.addWidget(page_subtitle("无需写代码，点击屏幕即可创建自动化任务。"))
+        split = QSplitter(Qt.Horizontal)
+        split.setHandleWidth(1)
+        split.setStyleSheet(f"QSplitter::handle{{background:{T.LINE};}}")
 
-        ly.addSpacing(T.SP_LG)
+        # ═══ LEFT: sidebar ═══
+        left_panel = QWidget()
+        left_panel.setStyleSheet(f"background:{T.CARD}; border:none; border-radius:{T.R_LG}px;")
+        left_ly = QVBoxLayout(left_panel)
+        left_ly.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
+        left_ly.setSpacing(T.SP_MD)
 
-        # Form card
-        self._editor_card = QWidget()
-        self._editor_card.setStyleSheet(f"""
-            background: {T.CARD};
-            border: none;
-            border-radius: {T.R_LG}px;
-        """)
-        fc_ly = QVBoxLayout(self._editor_card)
-        fc_ly.setContentsMargins(T.SP_XL, T.SP_XL, T.SP_XL, T.SP_XL)
-        fc_ly.setSpacing(T.SP_LG)
-
-        # Task name
-        fc_ly.addWidget(section_title("任务名称"))
+        left_ly.addWidget(section_title("任务名称"))
         self.ed_name = QComboBox()
         self.ed_name.setEditable(True)
-        self.ed_name.setStyleSheet(f"""
-            QComboBox {{
-                background: {T.GREEN_BG};
-                color: {T.GREEN};
-                border: 1px solid {T.GREEN}22;
-                border-radius: {T.R_SM}px;
-                padding: 5px 14px;
-                min-height: 32px;
-                max-height: 32px;
-                font-weight: 600;
-                font-size: 12px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 24px;
-            }}
-            QComboBox:hover {{
-                background: {T.GREEN_BG};
-                border: 1px solid {T.GREEN}44;
-            }}
-        """)
-        fc_ly.addWidget(self.ed_name)
+        self.ed_name.setStyleSheet(f"""QComboBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QComboBox::drop-down{{border:none;width:24px;}}QComboBox:hover{{background:{T.GREEN_BG};border:1px solid {T.GREEN}44;}}""")
+        left_ly.addWidget(self.ed_name)
 
-        # Steps list        # Steps list
-        fc_ly.addWidget(section_title("步骤"))
-        self.ed_list = QTextEdit()
-        self.ed_list.setReadOnly(True)
-        self.ed_list.setMaximumHeight(200)
-        self.ed_list.setFont(QFont("Cascadia Code,Consolas,monospace", 10))  # ← 自定义编辑器等宽字体
-        self.ed_list.setStyleSheet(f"""
-            background: {T.SURFACE};
-            color: {T.TEXT};
-            border: 1px solid {T.LINE};
-            border-radius: {T.R_MD}px;
-            padding: 14px;
-            font-size: 12px;
-        """)
-        fc_ly.addWidget(self.ed_list)
+        left_ly.addWidget(section_title("操作"))
+        for pair in [("+ 点击","click","+ 按键","press"), ("+ 等待","wait","+ 等到","wait_until")]:
+            hr = QHBoxLayout(); hr.setSpacing(T.SP_SM)
+            for t, a in [(pair[0],pair[1]), (pair[2],pair[3])]:
+                b = btn_ghost(t); b.setCursor(Qt.PointingHandCursor)
+                b.clicked.connect(lambda checked, act=a: self._ed_add(act))
+                hr.addWidget(b)
+            hr.addStretch(); left_ly.addLayout(hr)
 
-        # Step action buttons
-        row = QHBoxLayout()
-        row.setSpacing(T.SP_SM)
-        for text, action in [("+ 点击", "click"), ("+ 按键", "press"),
-                             ("+ 等待", "wait"), ("+ 等到", "wait_until")]:
-            b = btn_ghost(text)
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda checked, a=action: self._ed_add(a))
-            row.addWidget(b)
-        row.addStretch()
-        row.addStretch()
-        fc_ly.addLayout(row)
+        left_ly.addWidget(section_title("预览"))
+        self._ed_preview = QLabel("选择步骤查看预览")
+        self._ed_preview.setMinimumHeight(160)
+        self._ed_preview.setAlignment(Qt.AlignCenter)
+        self._ed_preview.setStyleSheet(f"background:{T.SURFACE};color:{T.TEXT3};border:1px solid {T.LINE};border-radius:{T.R_SM}px;font-size:11px;")
+        left_ly.addWidget(self._ed_preview)
 
-        # Loop count
-        lr = QHBoxLayout()
-        lr.setSpacing(T.SP_SM)
+        loop_row = QHBoxLayout(); loop_row.setSpacing(T.SP_SM)
         loop_label = QLabel("循环")
-        loop_label.setStyleSheet(f"font-size:13px; font-weight:700; color:{T.TEXT};")
-        lr.addWidget(loop_label)
-        self.ed_loop = QSpinBox()
-        self.ed_loop.setRange(1, 9999)
-        self.ed_loop.setValue(1)
-        self.ed_loop.setFixedWidth(80)
-        self.ed_loop.setStyleSheet(f"""
-            QSpinBox {{
-                background: {T.GREEN_BG};
-                color: {T.GREEN};
-                border: 1px solid {T.GREEN}22;
-                border-radius: {T.R_SM}px;
-                padding: 5px 14px;
-                min-height: 32px;
-                max-height: 32px;
-                font-weight: 600;
-                font-size: 12px;
-            }}
-            QSpinBox::up-button, QSpinBox::down-button {{
-                border: none;
-                width: 20px;
-                background: transparent;
-            }}
-            QSpinBox:hover {{
-                border: 1px solid {T.GREEN}44;
-            }}
-        """)
-        lr.addWidget(self.ed_loop)
+        loop_label.setStyleSheet(f"font-size:13px;font-weight:700;color:{T.TEXT};")
+        loop_row.addWidget(loop_label)
+        self.ed_loop = QSpinBox(); self.ed_loop.setRange(1,9999); self.ed_loop.setValue(1); self.ed_loop.setFixedWidth(80)
+        self.ed_loop.setStyleSheet(f"QSpinBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.GREEN}44;}}")
+        loop_row.addWidget(self.ed_loop)
         times_label = QLabel("次")
-        times_label.setStyleSheet(f"font-size:13px; font-weight:500; color:{T.TEXT2};")
-        lr.addWidget(times_label)
-        lr.addStretch()
-        fc_ly.addLayout(lr)
+        times_label.setStyleSheet(f"font-size:13px;font-weight:500;color:{T.TEXT2};")
+        loop_row.addWidget(times_label); loop_row.addStretch(); left_ly.addLayout(loop_row)
 
-        # Delete / Clear row
-        cr = QHBoxLayout()
-        cr.setSpacing(T.SP_SM)
-        del_btn = btn_ghost("删最后")
-        del_btn.clicked.connect(self._ed_del)
-        cr.addWidget(del_btn)
-        clr_btn = btn_ghost("清空")
-        clr_btn.clicked.connect(self._ed_clr)
-        cr.addWidget(clr_btn)
-        cr.addStretch()
-        fc_ly.addLayout(cr)
+        del_row = QHBoxLayout(); del_row.setSpacing(T.SP_SM)
+        del_btn = btn_ghost("删"); del_btn.setToolTip("删除选中步骤")
+        del_btn.clicked.connect(self._ed_del); del_row.addWidget(del_btn)
+        clr_btn = btn_ghost("清空"); clr_btn.clicked.connect(self._ed_clr); del_row.addWidget(clr_btn)
+        del_row.addStretch(); left_ly.addLayout(del_row)
 
-        ly.addWidget(self._editor_card)
-
-        # Save button (full width)
+        left_ly.addStretch(1)
         save = btn_primary("保存任务")
         save.setMinimumHeight(40)
         save.clicked.connect(self._ed_save)
-        ly.addWidget(save)
+        left_ly.addWidget(save)
 
-        ly.addStretch()
+        split.addWidget(left_panel)
+
+        # ═══ RIGHT: steps list ═══
+        right_panel = QWidget()
+        right_panel.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
+        right_ly = QVBoxLayout(right_panel)
+        right_ly.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
+        right_ly.setSpacing(T.SP_MD)
+        right_ly.addWidget(section_title("步骤 (拖拽排序)"))
+
+        self.ed_list = QListWidget()
+        self.ed_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.ed_list.setDefaultDropAction(Qt.MoveAction)
+        self.ed_list.setFont(QFont("Microsoft YaHei", 10))
+        self.ed_list.setStyleSheet(f"""QListWidget{{background:{T.SURFACE};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_MD}px;padding:8px;font-size:12px;outline:none;}}QListWidget::item{{padding:6px 10px;border-radius:4px;}}QListWidget::item:selected{{background:{T.ACCENT_DIM};color:{T.TEXT};}}QListWidget::item:hover{{background:{T.CARD_HOVER};}}""")
+        self.ed_list.currentRowChanged.connect(self._on_ed_step_selected)
+        right_ly.addWidget(self.ed_list, 1)
+
+        split.addWidget(right_panel)
+        split.setSizes([280, 520])
+        ly.addWidget(split, 1)
         return w
 
     # ══════════════════════════════════════
@@ -1580,22 +1571,52 @@ class SmartRPAGUI(QMainWindow):
             )
 
     def _ed_refresh(self):
+        self.ed_list.blockSignals(True)
         self.ed_list.clear()
         cm = {"click": "点", "press": "按键", "wait": "等待", "wait_until": "等到"}
         for i, s in enumerate(self._ed):
             n, _, _, _, _, a = s
             c = cm.get(a, a)
             if a == "wait":
-                self.ed_list.append(f"  [{i+1}] 等待 {n}")
+                text = f"  [{i+1}] 等待 {n}"
             elif a == "press":
-                self.ed_list.append(f"  [{i+1}] 按 {n}")
+                text = f"  [{i+1}] 按 {n}"
             else:
-                self.ed_list.append(f"  [{i+1}] {c} {n}")
+                text = f"  [{i+1}] {c} {n}"
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole, i)
+            self.ed_list.addItem(item)
+        self.ed_list.blockSignals(False)
+
+    def _on_ed_step_selected(self, row):
+        """Show template thumbnail when a step is selected."""
+        if row < 0 or row >= len(self._ed):
+            self._ed_preview.setText("选择步骤查看预览")
+            return
+        name = self.ed_name.currentText().strip()
+        if not name:
+            return
+        tpl = self._ed[row][0]
+        tpl_path = os.path.join(
+            os.path.dirname(__file__), "examples", name, "templates", f"{tpl}.png"
+        )
+        if os.path.exists(tpl_path):
+            pixmap = QPixmap(tpl_path)
+            scaled = pixmap.scaled(240, 160, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self._ed_preview.setPixmap(scaled)
+            self._ed_preview.setToolTip(f"{tpl}.png ({pixmap.width()}x{pixmap.height()})")
+        else:
+            self._ed_preview.setText(" 无预览")
+            self._ed_preview.setPixmap(QPixmap())
 
     def _ed_del(self):
-        if self._ed:
-            self._ed.pop()
-            self._ed_refresh()
+        if not self._ed:
+            return
+        row = self.ed_list.currentRow()
+        if row < 0:
+            row = len(self._ed) - 1
+        self._ed.pop(row)
+        self._ed_refresh()
 
     def _ed_clr(self):
         self._ed.clear()
@@ -1609,6 +1630,15 @@ class SmartRPAGUI(QMainWindow):
         if not self._ed:
             self.log_msg("请至少添加一个步骤", "WARN")
             return
+        # Reorder self._ed to match list widget (drag-drop order)
+        ordered = []
+        for i in range(self.ed_list.count()):
+            item = self.ed_list.item(i)
+            idx = item.data(Qt.UserRole)
+            if idx is not None and idx < len(self._ed):
+                ordered.append(self._ed[idx])
+        if ordered:
+            self._ed[:] = ordered
         d = os.path.join(os.path.dirname(__file__), "examples", name)
         os.makedirs(d, exist_ok=True)
         tasks, loop = {}, self.ed_loop.value()
