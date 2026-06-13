@@ -239,6 +239,8 @@ class TaskEngine:
                     success = self._do_callback(params)
                 elif action == "find":
                     success = self._do_find(screenshot, params)
+                elif action == "find_color":
+                    success = self._do_find_color(screenshot, params)
                 elif action == "if":
                     success = self._do_if(screenshot, params)
                 else:
@@ -282,7 +284,10 @@ class TaskEngine:
         dx, dy = self._anchor_offset
 
         if template:
-            result = self.vision.find(screenshot, template, threshold, roi)
+            use_multi_scale = params.get("multi_scale", True)
+            use_multi_angle = params.get("multi_angle", False)
+            result = self.vision.find(screenshot, template, threshold, roi,
+                                      use_multi_scale, use_multi_angle)
             if result.found:
                 self.controller.click(result.center[0] - dx, result.center[1] - dy)
                 return True
@@ -359,9 +364,25 @@ class TaskEngine:
         template = params.get("template")
         threshold = params.get("threshold", 0.8)
         if template:
-            result = self.vision.find(screenshot, template, threshold)
+            use_multi_scale = params.get("multi_scale", True)
+            use_multi_angle = params.get("multi_angle", False)
+            roi = params.get("roi")
+            result = self.vision.find(screenshot, template, threshold, roi,
+                                      use_multi_scale, use_multi_angle)
             return result.found
         return False
+
+    def _do_find_color(self, screenshot, params: dict) -> bool:
+        """通过颜色检测区域（无需模板图片）"""
+        target = params.get("target")
+        if not target or len(target) != 3:
+            return False
+        tolerance = params.get("tolerance", 40)
+        min_pct = params.get("min_pct", 0.15)
+        roi = params.get("roi")
+        result = self.vision.find_color_region(
+            screenshot, tuple(target), tolerance, min_pct, roi)
+        return result.found
 
     def _do_if(self, screenshot, params: dict) -> bool:
         """条件判断"""

@@ -61,11 +61,21 @@ class PopupHandler:
         if not self._enabled:
             return None
 
+        # Strategy 1: detect semi-transparent overlay (common popup feature)
+        if self.vision.detect_overlay(screenshot).found:
+            for name in self._close_templates:
+                if self.vision.find(screenshot, name, threshold=0.7).found:
+                    return f"popup_overlay:{name}"
+            if self._builtin_registered:
+                return "overlay_detected"
+
+        # Strategy 2: detect ad features
         for name in self._ad_templates:
             result = self.vision.find(screenshot, name, threshold=0.7)
             if result.found:
                 return f"ad:{name}"
 
+        # Strategy 3: detect close button directly
         for name in self._close_templates:
             result = self.vision.find(screenshot, name, threshold=0.75)
             if result.found:

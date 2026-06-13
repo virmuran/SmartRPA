@@ -30,6 +30,9 @@ screenshots/
 *.png.log
 !examples/*/templates/*.png
 
+# Tests (local only, not uploaded)
+tests/
+
 build_ico.py
 build.bat
 SmartRPA.png

@@ -1,0 +1,63 @@
+{
+    "_comment": "百度贴吧每日签到",
+    "_howto": "1. 打开百度贴吧首页(https://tieba.baidu.com)，截取签到按钮区域 → templates/signin_btn.png",
+    "_howto2": "2. 弹出签到面板后，截取'签到'按钮 → templates/checkin_btn.png",
+    "_howto3": "3. 如果未登录，截取右上角'登录'按钮 → templates/login_btn.png",
+    "_tips": "建议用任务编辑器的框选功能截图，或者用截图工具截取后放到 templates/ 目录",
+
+    "TrySignin": {
+        "desc": "尝试点击页面上方的'签到'按钮",
+        "action": "click",
+        "params": { "template": "signin_btn", "threshold": 0.8 },
+        "next": ["WaitPanel"],
+        "onErrorNext": ["CheckLogin"],
+        "humanDelay": "transition"
+    },
+
+    "WaitPanel": {
+        "desc": "等待签到面板弹出",
+        "action": "wait",
+        "params": { "seconds": 2 },
+        "next": ["DoCheckin"],
+        "humanDelay": "read"
+    },
+
+    "DoCheckin": {
+        "desc": "在弹出的签到面板中点击'签到'按钮",
+        "action": "click",
+        "params": { "template": "checkin_btn", "threshold": 0.8 },
+        "next": ["WaitResult"],
+        "retry": { "count": 2, "interval": 1.0 },
+        "humanDelay": "click"
+    },
+
+    "WaitResult": {
+        "desc": "等待签到结果（已签到/签到成功弹窗）",
+        "action": "wait",
+        "params": { "seconds": 2 },
+        "next": null
+    },
+
+    "CheckLogin": {
+        "desc": "如果找不到签到按钮，检查是否未登录",
+        "action": "find",
+        "params": { "template": "login_btn", "threshold": 0.8 },
+        "next": ["DoLogin"],
+        "onErrorNext": null
+    },
+
+    "DoLogin": {
+        "desc": "点击登录按钮",
+        "action": "click",
+        "params": { "template": "login_btn", "threshold": 0.8 },
+        "next": ["WaitLogin"],
+        "humanDelay": "transition"
+    },
+
+    "WaitLogin": {
+        "desc": "等待手动登录完成",
+        "action": "wait",
+        "params": { "seconds": 10 },
+        "next": ["TrySignin"]
+    }
+}

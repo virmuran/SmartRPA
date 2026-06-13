@@ -41,6 +41,20 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
+def data_dir(subdir: str = "") -> str:
+    """Get writable directory for user data (tasks, templates, etc.).
+    Uses %APPDATA%/SmartRPA on Windows, ~/.smartrpa on other platforms.
+    Created automatically if it doesn't exist."""
+    if os.name == "nt":
+        base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SmartRPA")
+    else:
+        base = os.path.join(os.path.expanduser("~"), ".smartrpa")
+    if subdir:
+        base = os.path.join(base, subdir)
+    os.makedirs(base, exist_ok=True)
+    return base
+
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QCheckBox, QComboBox, QFileDialog,
@@ -50,6 +64,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QGraphicsDropShadowEffect,
     QListWidget, QListWidgetItem, QAbstractItemView,
     QSystemTrayIcon, QMenu, QDateTimeEdit,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QRect, QTimer, QSettings
 from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon, QPixmap
@@ -1167,10 +1182,31 @@ class SmartRPAGUI(QMainWindow):
         """)
         self.task_combo.currentIndexChanged.connect(self._on_task_changed)
         tb.addWidget(self.task_combo, 1)
-        scan_btn = btn_ghost("扫描")
-        scan_btn.setFixedWidth(64)
-        scan_btn.clicked.connect(self._scan)
-        tb.addWidget(scan_btn)
+        opt_btn = QPushButton("选项")
+        opt_btn.setCursor(Qt.PointingHandCursor)
+        opt_btn.setFixedWidth(64)
+        opt_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {T.GREEN_BG}; color: {T.GREEN};
+                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
+                padding: 5px 10px; min-height: 32px; max-height: 32px;
+                font-weight: 600; font-size: 11px;
+            }}
+            QPushButton:hover {{ background: {T.GREEN_BG}; border: 1px solid {T.GREEN}44; }}
+            QPushButton::menu-indicator {{ image: none; width: 0; }}
+        """)
+        opt_menu = QMenu(opt_btn)
+        opt_menu.setStyleSheet(f"""
+            QMenu {{ background: {T.CARD}; color: {T.TEXT}; border: 1px solid {T.LINE}; border-radius: {T.R_SM}px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 20px; border-radius: 4px; }}
+            QMenu::item:selected {{ background: {T.ACCENT_DIM}; }}
+        """)
+        rename_action = opt_menu.addAction("重命名")
+        rename_action.triggered.connect(self._ed_rename)
+        delete_action = opt_menu.addAction("删除")
+        delete_action.triggered.connect(self._ed_delete_task)
+        opt_btn.setMenu(opt_menu)
+        tb.addWidget(opt_btn)
         Cl.addLayout(tb)
 
         # Template path
@@ -1561,7 +1597,11 @@ class SmartRPAGUI(QMainWindow):
 
     def _snap(self, task, tpl, x, y, w, h):
         import mss as _m, cv2 as _c
-        d = os.path.join(os.path.dirname(__file__), "examples", task, "templates")
+        # Create a unique task dir on first snap, reuse for this editing session
+        if not hasattr(self, '_ed_task_dir') or not self._ed_task_dir:
+            now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]
+            self._ed_task_dir = data_dir(f"tasks/{now}")
+        d = os.path.join(self._ed_task_dir, "templates")
         os.makedirs(d, exist_ok=True)
         with _m.mss() as sct:
             img = sct.grab({"left": x, "top": y, "width": w, "height": h})
@@ -1639,9 +1679,22 @@ class SmartRPAGUI(QMainWindow):
                 ordered.append(self._ed[idx])
         if ordered:
             self._ed[:] = ordered
-        d = os.path.join(os.path.dirname(__file__), "examples", name)
+
+        # Use existing editing dir if available, otherwise create new
+        if hasattr(self, '_ed_task_dir') and self._ed_task_dir and os.path.isdir(self._ed_task_dir):
+            d = self._ed_task_dir
+        else:
+            now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]
+            d = data_dir(f"tasks/{now}")
         os.makedirs(d, exist_ok=True)
+
+        # Store meta info (display name, timestamps)
         tasks, loop = {}, self.ed_loop.value()
+        tasks["_meta"] = {
+            "name": name,
+            "created": now,
+            "modified": datetime.datetime.now().isoformat()
+        }
         for i, s in enumerate(self._ed):
             tpl, x, y, w, h, a = s
             sid = f"Step{i+1}"
@@ -1668,23 +1721,113 @@ class SmartRPAGUI(QMainWindow):
         with open(os.path.join(d, "task.json"), "w", encoding="utf-8") as f:
             json.dump(tasks, f, ensure_ascii=False, indent=2)
         self.log_msg(f"已保存: {d}/task.json", "SUCCESS")
+        self._ed_task_dir = None  # reset for next editing session
         self._scan()
+
+    def _ed_rename(self):
+        """Rename a user task by updating _meta.name in its task.json."""
+        current = self.task_combo.currentText()
+        path = self._task_map.get(current)
+        if not path:
+            self.log_msg("请先选择一个任务", "WARN")
+            return
+        # Only allow renaming user tasks (not built-in)
+        if path.startswith(resource_path("examples")):
+            self.log_msg("内置任务不能改名", "WARN")
+            return
+        new_name, ok = QInputDialog.getText(
+            self, "改名", "新名称:", text=current
+        )
+        if not ok or not new_name.strip():
+            return
+        new_name = new_name.strip()
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if "_meta" not in data or not isinstance(data["_meta"], dict):
+                data["_meta"] = {}
+            data["_meta"]["name"] = new_name
+            data["_meta"]["modified"] = datetime.datetime.now().isoformat()
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self.log_msg(f"已改名: {new_name}", "SUCCESS")
+            self._scan()
+        except (IOError, json.JSONDecodeError) as e:
+            self.log_msg(f"改名失败: {e}", "ERROR")
+
+    def _ed_delete_task(self):
+        """Delete a user task folder."""
+        current = self.task_combo.currentText()
+        path = self._task_map.get(current)
+        if not path:
+            self.log_msg("请先选择一个任务", "WARN")
+            return
+        if path.startswith(resource_path("examples")):
+            self.log_msg("内置任务不能删除", "WARN")
+            return
+        task_dir = os.path.dirname(path)
+        reply = QMessageBox.warning(
+            self, "确认删除",
+            f"确定要删除用户任务「{current}」吗？\n{task_dir}\n\n此操作不可恢复！",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        import shutil
+        try:
+            shutil.rmtree(task_dir)
+            self.log_msg(f"已删除: {current}", "SUCCESS")
+            self._scan()
+        except OSError as e:
+            self.log_msg(f"删除失败: {e}", "ERROR")
 
     # ══════════════════════════════════════
     #  Tasks Logic (unchanged)
     # ══════════════════════════════════════
 
     def _scan(self):
+        """Scan both built-in examples and user data directory for tasks."""
         self._task_map.clear()
         self.task_combo.clear()
-        ex = os.path.join(os.path.dirname(__file__), "examples")
-        if not os.path.isdir(ex):
-            return
-        for d in sorted(os.listdir(ex)):
-            fp = os.path.join(ex, d, "task.json")
-            if os.path.exists(fp):
-                self._task_map[d] = fp
-                self.task_combo.addItem(d)
+
+        # Scan built-in examples (read-only, bundled with exe)
+        ex = resource_path("examples")
+        if os.path.isdir(ex):
+            for d in sorted(os.listdir(ex)):
+                fp = os.path.join(ex, d, "task.json")
+                if os.path.exists(fp):
+                    self._task_map[d] = fp
+                    self.task_combo.addItem(d)
+
+        # Scan user data directory (timestamp folders, read _meta.name)
+        user_dir = data_dir("tasks")
+        if os.path.isdir(user_dir):
+            for folder in sorted(os.listdir(user_dir)):
+                fp = os.path.join(user_dir, folder, "task.json")
+                if not os.path.exists(fp):
+                    continue
+                # Read display name from _meta.name, fallback to folder name
+                display = folder
+                try:
+                    with open(fp, encoding="utf-8") as f:
+                        data = json.load(f)
+                        meta = data.get("_meta", {})
+                        if isinstance(meta, dict) and meta.get("name"):
+                            display = meta["name"]
+                except (json.JSONDecodeError, IOError):
+                    pass
+                # Deduplicate: append suffix if display name already taken
+                key = display
+                suffix = 1
+                while key in self._task_map:
+                    suffix += 1
+                    key = f"{display} ({suffix})"
+                self._task_map[key] = fp
+                self.task_combo.addItem(key)
+
+        # Auto-select first item
+        if self.task_combo.count() > 0:
+            self.task_combo.setCurrentIndex(0)
 
     def _on_task_changed(self):
         path = self._task_map.get(self.task_combo.currentText())
