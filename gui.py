@@ -1556,44 +1556,50 @@ class SmartRPAGUI(QMainWindow):
     # ══════════════════════════════════════
 
     def _ed_add(self, action):
-        name = self.ed_name.currentText().strip()
-        if not name:
-            self.log_msg("请先输入任务名称", "WARN")
-            return
-        if action == "press":
-            k, ok = QInputDialog.getText(self, "按键", "按键名:")
-            if ok and k.strip():
-                self._ed.append((k.strip(), 0, 0, 0, 0, "press"))
-                self._ed_refresh()
-            return
-        if action == "wait":
-            s, ok = QInputDialog.getDouble(self, "等待", "秒:", 2.0, 0.1, 60, 1)
-            if ok:
-                self._ed.append((f"{s:.1f}秒", 0, 0, 0, 0, "wait"))
-                self._ed_refresh()
-            return
-        if action == "wait_until":
+        try:
+            name = self.ed_name.currentText().strip()
+            if not name:
+                name = datetime.datetime.now().strftime("%m月%d日 %H:%M")
+                self.ed_name.setEditText(name)
+                self.log_msg(f"自动创建任务: {name}", "INFO")
+            if action == "press":
+                k, ok = QInputDialog.getText(self, "按键", "按键名:")
+                if ok and k.strip():
+                    self._ed.append((k.strip(), 0, 0, 0, 0, "press"))
+                    self._ed_refresh()
+                return
+            if action == "wait":
+                s, ok = QInputDialog.getDouble(self, "等待", "秒:", 2.0, 0.1, 60, 1)
+                if ok:
+                    self._ed.append((f"{s:.1f}秒", 0, 0, 0, 0, "wait"))
+                    self._ed_refresh()
+                return
+            if action == "wait_until":
+                self.showMinimized()
+                d = RegionSelector()
+                if d.exec() and d.region:
+                    x, y, w, h = d.region
+                    self._snap(name, f"wait_{len(self._ed)+1}", x, y, w, h)
+                    t, ok = QInputDialog.getInt(self, "超时", "最大秒:", 60, 1, 600, 1)
+                    if ok:
+                        self._ed.append((f"wait_{len(self._ed)+1}", x, y, w, h, "wait_until"))
+                        self._ed_refresh()
+                self.showNormal()
+                return
+            # click
             self.showMinimized()
             d = RegionSelector()
             if d.exec() and d.region:
                 x, y, w, h = d.region
-                self._snap(name, f"wait_{len(self._ed)+1}", x, y, w, h)
-                t, ok = QInputDialog.getInt(self, "超时", "最大秒:", 60, 1, 600, 1)
-                if ok:
-                    self._ed.append((f"wait_{len(self._ed)+1}", x, y, w, h, "wait_until"))
-                    self._ed_refresh()
+                tpl = f"s{len(self._ed)+1}"
+                self._snap(name, tpl, x, y, w, h)
+                self._ed.append((tpl, x, y, w, h, "click"))
+                self._ed_refresh()
             self.showNormal()
-            return
-        # click
-        self.showMinimized()
-        d = RegionSelector()
-        if d.exec() and d.region:
-            x, y, w, h = d.region
-            tpl = f"s{len(self._ed)+1}"
-            self._snap(name, tpl, x, y, w, h)
-            self._ed.append((tpl, x, y, w, h, "click"))
-            self._ed_refresh()
-        self.showNormal()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "操作失败", f"{type(e).__name__}: {e}")
 
     def _snap(self, task, tpl, x, y, w, h):
         import mss as _m, cv2 as _c
