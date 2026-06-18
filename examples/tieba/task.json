@@ -1,63 +1,185 @@
 {
-    "_comment": "百度贴吧每日签到",
-    "_howto": "1. 打开百度贴吧首页(https://tieba.baidu.com)，截取签到按钮区域 → templates/signin_btn.png",
-    "_howto2": "2. 弹出签到面板后，截取'签到'按钮 → templates/checkin_btn.png",
-    "_howto3": "3. 如果未登录，截取右上角'登录'按钮 → templates/login_btn.png",
-    "_tips": "建议用任务编辑器的框选功能截图，或者用截图工具截取后放到 templates/ 目录",
+    "_meta": { "name": "贴吧签到（全吧）" },
+    "_comment": "原理：展开常逛的吧列表 → 循环找灰色星星 → 点进去签到 → 返回刷新 → 继续",
+    "_howto": "截图放到 examples/tieba/templates/：",
+    "_howto2": "  - view_more.png: 左侧'查看更多'（悬停展开列表）",
+    "_howto3": "  - grey_star.png: 灰色星星（7级以下标记）",
+    "_howto4": "  - check_mark.png: 已签到的对号 ✓（用于排除已签）",
+    "_howto5": "  - signin_btn_tieba.png: 单个贴吧页面的蓝色'签到'按钮",
+    "_howto6": "  - switch_old_btn.png: 右上角'切换到旧版'入口",
+    "_howto7": "  - logo.png: 左上角'百度贴吧'logo（点它返回首页+自动刷新）",
+    "_howto8": "  - onekey_signin.png: 旧版左侧蓝色'一键签到'按钮",
+    "_howto9": "  - start_signin.png: 弹窗蓝色'开始签到'按钮",
+    "_howto10": "  - close_popup.png: 结果弹窗右上角'X'（关闭）",
+    "_howto11": "提示：运行时可在任务页面点 [停止] 中断循环",
 
-    "TrySignin": {
-        "desc": "尝试点击页面上方的'签到'按钮",
-        "action": "click",
-        "params": { "template": "signin_btn", "threshold": 0.8 },
-        "next": ["WaitPanel"],
-        "onErrorNext": ["CheckLogin"],
+    "_flow": "启动Edge→贴吧→切旧版→一键签到(处理7级+)→逐个遍历低等级→完成",
+
+    "LaunchEdge": {
+        "desc": "打开 Edge 浏览器进入贴吧",
+        "action": "exec",
+        "params": { "cmd": "start msedge https://tieba.baidu.com" },
+        "next": ["WaitPage"],
         "humanDelay": "transition"
     },
 
-    "WaitPanel": {
-        "desc": "等待签到面板弹出",
+    "WaitPage": {
+        "desc": "等待首页加载",
         "action": "wait",
-        "params": { "seconds": 2 },
-        "next": ["DoCheckin"],
+        "params": { "seconds": 5 },
+        "next": ["SwitchToOld"],
         "humanDelay": "read"
     },
 
-    "DoCheckin": {
-        "desc": "在弹出的签到面板中点击'签到'按钮",
+    "SwitchToOld": {
+        "desc": "切换到旧版（已在旧版则跳过）",
         "action": "click",
-        "params": { "template": "checkin_btn", "threshold": 0.8 },
-        "next": ["WaitResult"],
+        "params": { "template": "switch_old_btn", "threshold": 0.75, "multi_scale": true },
+        "next": ["WaitOldLoad"],
+        "retry": { "count": 2, "interval": 1.0 },
+        "humanDelay": "transition"
+    },
+
+    "WaitOldLoad": {
+        "desc": "等待旧版加载",
+        "action": "wait",
+        "params": { "seconds": 3 },
+        "next": ["OneKeySignin"],
+        "humanDelay": "read"
+    },
+
+    "OneKeySignin": {
+        "desc": "点击'一键签到'（处理7级以上吧）",
+        "action": "click",
+        "params": { "template": "onekey_signin", "threshold": 0.75, "multi_scale": true },
+        "next": ["WaitOneKeyDialog"],
+        "retry": { "count": 2, "interval": 1.0 },
+        "humanDelay": "transition"
+    },
+
+    "WaitOneKeyDialog": {
+        "desc": "等待签到弹窗",
+        "action": "wait",
+        "params": { "seconds": 2 },
+        "next": ["DoOneKeySignin"],
+        "humanDelay": "read"
+    },
+
+    "DoOneKeySignin": {
+        "desc": "点击'开始签到'",
+        "action": "click",
+        "params": { "template": "start_signin", "threshold": 0.8 },
+        "next": ["WaitOneKeyDone"],
         "retry": { "count": 2, "interval": 1.0 },
         "humanDelay": "click"
     },
 
-    "WaitResult": {
-        "desc": "等待签到结果（已签到/签到成功弹窗）",
+    "WaitOneKeyDone": {
+        "desc": "等待一键签到完成",
         "action": "wait",
-        "params": { "seconds": 2 },
-        "next": null
+        "params": { "seconds": 3 },
+        "next": ["CloseResult"],
+        "humanDelay": "read"
     },
 
-    "CheckLogin": {
-        "desc": "如果找不到签到按钮，检查是否未登录",
-        "action": "find",
-        "params": { "template": "login_btn", "threshold": 0.8 },
-        "next": ["DoLogin"],
-        "onErrorNext": null
-    },
-
-    "DoLogin": {
-        "desc": "点击登录按钮",
+    "CloseResult": {
+        "desc": "关闭签到结果弹窗",
         "action": "click",
-        "params": { "template": "login_btn", "threshold": 0.8 },
-        "next": ["WaitLogin"],
+        "params": { "template": "close_popup", "threshold": 0.75 },
+        "next": ["WaitClose"],
+        "retry": { "count": 2, "interval": 1.0 },
         "humanDelay": "transition"
     },
 
-    "WaitLogin": {
-        "desc": "等待手动登录完成",
+    "WaitClose": {
+        "desc": "弹窗关闭后等1秒",
         "action": "wait",
-        "params": { "seconds": 10 },
-        "next": ["TrySignin"]
+        "params": { "seconds": 1 },
+        "next": ["HoverViewMore"],
+        "humanDelay": "read"
+    },
+
+    "HoverViewMore": {
+        "desc": "悬停'查看更多'展开列表",
+        "action": "move",
+        "params": { "template": "view_more", "threshold": 0.75, "multi_scale": true },
+        "next": ["WaitListExpanded"],
+        "retry": { "count": 2, "interval": 1.0 },
+        "humanDelay": "transition"
+    },
+
+    "WaitListExpanded": {
+        "desc": "等待列表展开",
+        "action": "wait",
+        "params": { "seconds": 2 },
+        "next": ["FindUnsigned"],
+        "humanDelay": "read"
+    },
+
+    "FindUnsigned": {
+        "desc": "查找灰色星星（有灰色星星→未签到低等级吧）",
+        "action": "find",
+        "params": { "template": "grey_star", "threshold": 0.75, "multi_scale": true },
+        "next": ["ClickTieba"],
+        "onErrorNext": ["DoneAll"],
+        "humanDelay": "read"
+    },
+
+    "DoneAll": {
+        "desc": "未找到灰色星星，所有低等级吧已签完",
+        "action": "wait",
+        "params": { "seconds": 1 },
+        "next": null
+    },
+
+    "ClickTieba": {
+        "desc": "点击灰色星星进入该贴吧",
+        "action": "click",
+        "params": { "template": "grey_star", "threshold": 0.75, "multi_scale": true },
+        "next": ["WaitTiebaPage"],
+        "retry": { "count": 2, "interval": 1.0 },
+        "humanDelay": "transition"
+    },
+
+    "WaitTiebaPage": {
+        "desc": "等待贴吧页面加载",
+        "action": "wait",
+        "params": { "seconds": 3 },
+        "next": ["TrySignin"],
+        "humanDelay": "read"
+    },
+
+    "TrySignin": {
+        "desc": "尝试点击签到按钮（已签到则自动跳过）",
+        "action": "click",
+        "params": { "template": "signin_btn_tieba", "threshold": 0.8, "multi_scale": true },
+        "next": ["WaitSigninDone"],
+        "onErrorNext": ["BackToHome"],
+        "humanDelay": "click"
+    },
+
+    "WaitSigninDone": {
+        "desc": "等待签到完成",
+        "action": "wait",
+        "params": { "seconds": 3 },
+        "next": ["BackToHome"],
+        "humanDelay": "read"
+    },
+
+    "BackToHome": {
+        "desc": "点 logo 返回首页（自动刷新）",
+        "action": "click",
+        "params": { "template": "logo", "threshold": 0.75, "multi_scale": true },
+        "next": ["WaitHomeLoad"],
+        "retry": { "count": 2, "interval": 1.0 },
+        "humanDelay": "transition"
+    },
+
+    "WaitHomeLoad": {
+        "desc": "等待首页加载",
+        "action": "wait",
+        "params": { "seconds": 4 },
+        "next": ["HoverViewMore"],
+        "humanDelay": "read"
     }
 }

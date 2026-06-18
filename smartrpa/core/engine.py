@@ -57,7 +57,8 @@ class TaskEngine:
     def _load_file(self, filepath: Path):
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
-        tasks = {k: v for k, v in data.items() if isinstance(v, dict)}
+        tasks = {k: v for k, v in data.items()
+                 if isinstance(v, dict) and not k.startswith('_')}
         self._tasks.update(tasks)
         logger.info(f"Loaded {len(tasks)} task definitions")
 
@@ -243,6 +244,12 @@ class TaskEngine:
                     success = self._do_find_color(screenshot, params)
                 elif action == "if":
                     success = self._do_if(screenshot, params)
+                elif action == "exec":
+                    success = self._do_exec(params)
+                elif action == "move":
+                    success = self._do_move(screenshot, params)
+                elif action == "hotkey":
+                    success = self._do_hotkey(params)
                 else:
                     logger.error(f"未知动作: {action}")
                     success = False
@@ -397,3 +404,49 @@ class TaskEngine:
                 return result.found
 
         return False
+
+    def _do_exec(self, params: dict) -> bool:
+        """执行终端命令（启动程序、打开链接等）"""
+        cmd = params.get("cmd", "")
+        if not cmd:
+            return False
+        import subprocess
+        try:
+            subprocess.Popen(cmd, shell=True)
+            logger.info(f"  └ 已执行: {cmd}")
+            return True
+        except Exception as e:
+            logger.error(f"执行命令失败: {e}")
+            return False
+
+    def _do_move(self, screenshot, params: dict) -> bool:
+        """移动鼠标到模板位置（悬停触发，不点击）"""
+        template = params.get("template")
+        threshold = params.get("threshold", 0.8)
+        if template:
+            use_multi_scale = params.get("multi_scale", True)
+            use_multi_angle = params.get("multi_angle", False)
+            roi = params.get("roi")
+            result = self.vision.find(screenshot, template, threshold, roi,
+                                      use_multi_scale, use_multi_angle)
+            if result.found:
+                self.controller.move_to(result.center[0], result.center[1])
+                logger.info(f"  └ 悬停: {template} ({result.center[0]},{result.center[1]})")
+                return True
+            logger.warning(f"  └ 未找到悬停目标: {template}")
+            return False
+        return False
+
+    def _do_hotkey(self, params: dict) -> bool:
+        """发送组合键（如 alt+left 浏览器后退）"""
+        keys = params.get("keys", [])
+        if not keys:
+            return False
+        import pyautogui
+        try:
+            pyautogui.hotkey(*keys)
+            logger.info(f"  └ 组合键: {'+'.join(keys)}")
+            return True
+        except Exception as e:
+            logger.error(f"组合键失败: {e}")
+            return False

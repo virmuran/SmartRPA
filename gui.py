@@ -26,7 +26,7 @@
 #  全局 QFont         | 文件末尾 app.setFont()      | 全局后备字体 10px
 # ═══════════════════════════════════════════════════════════════
 #
-import sys, os, json, datetime
+import sys, os, json, datetime, time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -735,6 +735,163 @@ class ThemeSwitch(QWidget):
 
 
 # ═══════════════════════════════════════════════
+#  Action Recorder — record mouse/keyboard → task JSON
+# ═══════════════════════════════════════════════
+
+class ActionRecorder(QThread):
+    """Record user mouse clicks and key presses to generate a task."""
+    log = Signal(str, str)  # message, level
+    finished = Signal(str)  # task_json_path
+
+    def __init__(self, parent=None, stop_key=None):
+        super().__init__(parent)
+        self._active = False
+        self._events = []
+        self._stop_key = stop_key or "Key.f6"  # default: F6
+
+    def stop(self):
+        self._active = False
+
+    def run(self):
+        self._active = True
+        self._events = []
+        try:
+            from pynput import mouse, keyboard
+        except ImportError:
+            self.log.emit("请安装 pynput: pip install pynput", "ERROR")
+            return
+
+        def on_click(x, y, button, pressed):
+            if not self._active:
+                return False
+            if not pressed:
+                return
+            if self._events and self._events[-1][1] == "click":
+                last_x, last_y = self._events[-1][2][:2]
+                if abs(x - last_x) < 3 and abs(y - last_y) < 3:
+                    return
+            self._events.append((time.time(), "click", (x, y)))
+            self.log.emit(f"  📍 点击 ({x}, {y})", "INFO")
+
+        def on_press(key):
+            if not self._active:
+                return False
+            # Check stop key
+            current = str(key) if hasattr(key, 'char') else str(key)
+            if self._stop_key == current:
+                self.log.emit(f"检测到停止快捷键，正在停止录制...", "INFO")
+                self._active = False
+                return False
+            try:
+                k = key.char
+            except AttributeError:
+                k = str(key).replace("Key.", "")
+            self._events.append((time.time(), "press", k))
+            self.log.emit(f"  ⌨ 按键 {k}", "INFO")
+
+        m_listener = mouse.Listener(on_click=on_click)
+        k_listener = keyboard.Listener(on_press=on_press)
+        m_listener.start()
+        k_listener.start()
+
+        # Keep running until stopped
+        while self._active:
+            time.sleep(0.1)
+
+        m_listener.stop()
+        k_listener.stop()
+        self._build_task()
+
+    def _build_task(self):
+        if not self._events:
+            self.log.emit("没有记录到任何操作", "WARN")
+            return
+        # Filter: merge clicks at same position, remove sub-second duplicates
+        filtered = []
+        for ev in self._events:
+            if not filtered:
+                filtered.append(ev)
+                continue
+            # Merge if same type and very close position (click) or same key (press)
+            if ev[1] == "click" and filtered[-1][1] == "click":
+                lx, ly = filtered[-1][2]
+                cx, cy = ev[2]
+                if abs(cx - lx) < 5 and abs(cy - ly) < 5:
+                    continue  # skip duplicate at same spot
+            filtered.append(ev)
+
+        now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]
+        task_dir = data_dir(f"tasks/{now}")
+        tpl_dir = os.path.join(task_dir, "templates")
+        os.makedirs(tpl_dir, exist_ok=True)
+
+        tasks, step_num = {}, 0
+        prev_time = filtered[0][0]
+        import mss as _m, cv2 as _c
+
+        for ev in filtered:
+            ts, etype, data = ev
+            gap = ts - prev_time
+            prev_time = ts
+
+            # Add wait for gaps > 2 seconds
+            if gap > 2.0 and step_num > 0:
+                step_num += 1
+                sid = f"Step{step_num}"
+                tasks[sid] = {
+                    "desc": f"等待{gap:.1f}秒",
+                    "action": "wait",
+                    "params": {"seconds": round(gap, 1)}
+                }
+                if step_num > 1:
+                    tasks[f"Step{step_num-1}"]["next"] = [sid]
+
+            step_num += 1
+            sid = f"Step{step_num}"
+
+            if etype == "click":
+                x, y = data
+                # Capture area around click (60x60, focused on target)
+                with _m.mss() as sct:
+                    cx, cy = max(0, x-30), max(0, y-30)
+                    region = {"left": cx, "top": cy, "width": 60, "height": 60}
+                    img = sct.grab(region)
+                    tpl_name = f"s{step_num}"
+                    _c.imwrite(
+                        os.path.join(tpl_dir, f"{tpl_name}.png"),
+                        _c.cvtColor(np.array(img), _c.COLOR_BGRA2BGR)
+                    )
+                # Use lower threshold + multi-scale for recorded templates
+                tasks[sid] = {
+                    "desc": f"点击({x},{y})",
+                    "action": "click",
+                    "params": {"template": tpl_name, "threshold": 0.7,
+                               "multi_scale": True}
+                }
+            elif etype == "press":
+                tasks[sid] = {
+                    "desc": f"按键 {data}",
+                    "action": "press",
+                    "params": {"key": data}
+                }
+
+            if step_num > 1:
+                tasks[f"Step{step_num-1}"]["next"] = [sid]
+
+        # Write task JSON
+        tasks["_meta"] = {
+            "name": f"录制_{datetime.datetime.now().strftime('%m月%d日_%H%M')}",
+            "created": now,
+            "modified": datetime.datetime.now().isoformat()
+        }
+        with open(os.path.join(task_dir, "task.json"), "w", encoding="utf-8") as f:
+            json.dump(tasks, f, ensure_ascii=False, indent=2)
+
+        self.log.emit(f"录制完成: {step_num}步 → {task_dir}/task.json", "SUCCESS")
+        self.finished.emit(os.path.join(task_dir, "task.json"))
+
+
+# ═══════════════════════════════════════════════
 #  Main Window (2026 Layout)
 # ═══════════════════════════════════════════════
 
@@ -794,6 +951,7 @@ class SmartRPAGUI(QMainWindow):
         nav_items = [
             "自动化任务",
             "任务编辑器",
+            "设置",
             "关于",
         ]
         for label in nav_items:
@@ -859,9 +1017,11 @@ class SmartRPAGUI(QMainWindow):
         self.content_stack = QStackedWidget()
         self._tasks_page = self._tasks_content()
         self._editor_page = self._editor_content()
+        self._settings_page = self._settings_content()
         self._about_page = self._about_content()
         self.content_stack.addWidget(self._tasks_page)
         self.content_stack.addWidget(self._editor_page)
+        self.content_stack.addWidget(self._settings_page)
         self.content_stack.addWidget(self._about_page)
         right_ly.addWidget(self.content_stack, 1)
 
@@ -955,6 +1115,7 @@ class SmartRPAGUI(QMainWindow):
         # Refresh content pages
         self._refresh_tasks_styles()
         self._refresh_editor_styles()
+        self._refresh_settings_styles()
         self._refresh_about_styles()
 
     def _refresh_tasks_styles(self):
@@ -1061,6 +1222,17 @@ class SmartRPAGUI(QMainWindow):
                 label.setStyleSheet(f"font-size:24px; font-weight:700; color:{T.TEXT}; letter-spacing:-0.5px;")
             elif txt == "无需写代码，点击屏幕即可创建自动化任务。":
                 label.setStyleSheet(f"font-size:14px; color:{T.TEXT2}; font-weight:400;")
+
+        # Recording button
+        if hasattr(self, 'rec_btn'):
+            self.rec_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {T.RED_BG}; color: {T.RED};
+                    border: 1px solid {T.RED}33; border-radius: {T.R_SM}px;
+                    padding: 5px 14px; font-weight: 600; font-size: 12px;
+                }}
+                QPushButton:hover {{ border: 1px solid {T.RED}66; }}
+            """)
 
     def _refresh_about_styles(self):
         """Refresh the about page inline styles."""
@@ -1203,6 +1375,12 @@ class SmartRPAGUI(QMainWindow):
         """)
         rename_action = opt_menu.addAction("重命名")
         rename_action.triggered.connect(self._ed_rename)
+        opt_menu.addSeparator()
+        export_action = opt_menu.addAction("导出为 ZIP")
+        export_action.triggered.connect(self._export_task)
+        import_action = opt_menu.addAction("从 ZIP 导入")
+        import_action.triggered.connect(self._import_task)
+        opt_menu.addSeparator()
         delete_action = opt_menu.addAction("删除")
         delete_action.triggered.connect(self._ed_delete_task)
         opt_btn.setMenu(opt_menu)
@@ -1254,49 +1432,6 @@ class SmartRPAGUI(QMainWindow):
         region_btn.clicked.connect(self._select_region)
         rb.addWidget(region_btn)
         Cl.addLayout(rb)
-
-        # Options
-        Cl.addWidget(section_title("选项"))
-        self.popup_cb = QCheckBox("自动处理弹窗")
-        self.popup_cb.setChecked(True)
-        Cl.addWidget(self.popup_cb)
-
-        # ── Schedule ──
-        Cl.addWidget(section_title("定时"))
-        sch_row = QHBoxLayout()
-        sch_row.setSpacing(T.SP_SM)
-        self.sched_cb = QCheckBox("启用")
-        self.sched_cb.toggled.connect(self._on_sched_toggle)
-        sch_row.addWidget(self.sched_cb)
-        self.sched_combo = QComboBox()
-        self.sched_combo.addItems(["每天", "每小时"])
-        self.sched_combo.setStyleSheet(f"""
-            QComboBox {{
-                background: {T.GREEN_BG}; color: {T.GREEN};
-                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
-                padding: 3px 10px; min-height: 28px; max-height: 28px;
-                font-weight: 600; font-size: 11px;
-            }}
-            QComboBox::drop-down {{ border: none; width: 20px; }}
-        """)
-        sch_row.addWidget(self.sched_combo)
-        self.sched_time = QDateTimeEdit()
-        self.sched_time.setDisplayFormat("HH:mm")
-        self.sched_time.setTime(self.sched_time.time().fromString("09:00", "HH:mm"))
-        self.sched_time.setStyleSheet(f"""
-            QDateTimeEdit {{
-                background: {T.GREEN_BG}; color: {T.GREEN};
-                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
-                padding: 3px 10px; min-height: 28px; max-height: 28px;
-                font-weight: 600; font-size: 11px;
-            }}
-        """)
-        sch_row.addWidget(self.sched_time)
-        sch_row.addStretch()
-        Cl.addLayout(sch_row)
-        self.sched_next = QLabel("")
-        self.sched_next.setStyleSheet(f"font-size:11px; color:{T.TEXT3};")
-        Cl.addWidget(self.sched_next)
 
         Cl.addStretch(1)
 
@@ -1419,13 +1554,31 @@ class SmartRPAGUI(QMainWindow):
         left_ly.addWidget(self.ed_name)
 
         left_ly.addWidget(section_title("操作"))
-        for pair in [("+ 点击","click","+ 按键","press"), ("+ 等待","wait","+ 等到","wait_until")]:
-            hr = QHBoxLayout(); hr.setSpacing(T.SP_SM)
-            for t, a in [(pair[0],pair[1]), (pair[2],pair[3])]:
-                b = btn_ghost(t); b.setCursor(Qt.PointingHandCursor)
-                b.clicked.connect(lambda checked, act=a: self._ed_add(act))
-                hr.addWidget(b)
-            hr.addStretch(); left_ly.addLayout(hr)
+        op_row = QHBoxLayout(); op_row.setSpacing(T.SP_SM)
+        for label, act in [("+ 点击","click"), ("+ 按键","press"), ("+ 等待","wait"), ("+ 等到","wait_until")]:
+            b = btn_ghost(label); b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda checked, a=act: self._ed_add(a))
+            op_row.addWidget(b)
+        op_row.addStretch()
+        left_ly.addLayout(op_row)
+
+        # Recording row
+        rec_row = QHBoxLayout(); rec_row.setSpacing(T.SP_SM)
+        self.rec_btn = QPushButton("⏺  录制")
+        self.rec_btn.setCursor(Qt.PointingHandCursor)
+        self.rec_btn.setMinimumHeight(36)
+        self.rec_btn.clicked.connect(self._toggle_record)
+        self.rec_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {T.RED_BG}; color: {T.RED};
+                border: 1px solid {T.RED}33; border-radius: {T.R_SM}px;
+                padding: 5px 14px; font-weight: 600; font-size: 12px;
+            }}
+            QPushButton:hover {{ border: 1px solid {T.RED}66; }}
+        """)
+        rec_row.addWidget(self.rec_btn)
+        rec_row.addStretch()
+        left_ly.addLayout(rec_row)
 
         left_ly.addWidget(section_title("预览"))
         self._ed_preview = QLabel("选择步骤查看预览")
@@ -1448,6 +1601,10 @@ class SmartRPAGUI(QMainWindow):
         del_row = QHBoxLayout(); del_row.setSpacing(T.SP_SM)
         del_btn = btn_ghost("删"); del_btn.setToolTip("删除选中步骤")
         del_btn.clicked.connect(self._ed_del); del_row.addWidget(del_btn)
+        edit_btn = btn_ghost("编辑"); edit_btn.setToolTip("编辑选中步骤参数")
+        edit_btn.clicked.connect(self._ed_edit_step); del_row.addWidget(edit_btn)
+        copy_btn = btn_ghost("复制"); copy_btn.setToolTip("复制选中步骤")
+        copy_btn.clicked.connect(self._ed_copy_step); del_row.addWidget(copy_btn)
         clr_btn = btn_ghost("清空"); clr_btn.clicked.connect(self._ed_clr); del_row.addWidget(clr_btn)
         del_row.addStretch(); left_ly.addLayout(del_row)
 
@@ -1479,6 +1636,118 @@ class SmartRPAGUI(QMainWindow):
         split.setSizes([280, 520])
         ly.addWidget(split, 1)
         return w
+
+    # ══════════════════════════════════════
+    #  PAGE: 设置
+    # ══════════════════════════════════════
+
+    def _settings_content(self):
+        w = QWidget()
+        w.setStyleSheet(f"background:{T.BG};")
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
+        outer.setSpacing(T.SP_LG)
+
+        # Scrollable container
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner = QWidget()
+        inner.setStyleSheet(f"background:transparent;")
+        ly = QVBoxLayout(inner)
+        ly.setContentsMargins(0, 0, T.SP_SM, 0)
+        ly.setSpacing(T.SP_LG)
+        scroll.setWidget(inner)
+
+        # ── Card: 选项 ──
+        self._set_card_options = QWidget()
+        self._set_card_options.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
+        opt_ly = QVBoxLayout(self._set_card_options)
+        opt_ly.setContentsMargins(T.SP_XL, T.SP_LG, T.SP_XL, T.SP_LG)
+        opt_ly.setSpacing(T.SP_MD)
+        opt_ly.addWidget(section_header("选项"))
+        self.popup_cb = QCheckBox("自动处理弹窗")
+        self.popup_cb.setChecked(True)
+        opt_ly.addWidget(self.popup_cb)
+        ly.addWidget(self._set_card_options)
+
+        # ── Card: 定时 ──
+        self._set_card_sched = QWidget()
+        self._set_card_sched.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
+        sch_ly = QVBoxLayout(self._set_card_sched)
+        sch_ly.setContentsMargins(T.SP_XL, T.SP_LG, T.SP_XL, T.SP_LG)
+        sch_ly.setSpacing(T.SP_MD)
+        sch_ly.addWidget(section_header("定时"))
+        sch_row = QHBoxLayout()
+        sch_row.setSpacing(T.SP_SM)
+        self.sched_cb = QCheckBox("启用")
+        self.sched_cb.toggled.connect(self._on_sched_toggle)
+        sch_row.addWidget(self.sched_cb)
+        self.sched_combo = QComboBox()
+        self.sched_combo.addItems(["每天", "每小时"])
+        self.sched_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {T.GREEN_BG}; color: {T.GREEN};
+                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
+                padding: 3px 10px; min-height: 28px; max-height: 28px;
+                font-weight: 600; font-size: 11px;
+            }}
+            QComboBox::drop-down {{ border: none; width: 20px; }}
+        """)
+        sch_row.addWidget(self.sched_combo)
+        self.sched_time = QDateTimeEdit()
+        self.sched_time.setDisplayFormat("HH:mm")
+        self.sched_time.setTime(self.sched_time.time().fromString("09:00", "HH:mm"))
+        self.sched_time.setStyleSheet(f"""
+            QDateTimeEdit {{
+                background: {T.GREEN_BG}; color: {T.GREEN};
+                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
+                padding: 3px 10px; min-height: 28px; max-height: 28px;
+                font-weight: 600; font-size: 11px;
+            }}
+        """)
+        sch_row.addWidget(self.sched_time)
+        sch_row.addStretch()
+        sch_ly.addLayout(sch_row)
+        self.sched_next = QLabel("")
+        self.sched_next.setStyleSheet(f"font-size:11px; color:{T.TEXT3};")
+        sch_ly.addWidget(self.sched_next)
+        ly.addWidget(self._set_card_sched)
+
+        # ── Card: 录制快捷键 ──
+        self._set_card_hk = QWidget()
+        self._set_card_hk.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
+        hk_ly = QVBoxLayout(self._set_card_hk)
+        hk_ly.setContentsMargins(T.SP_XL, T.SP_LG, T.SP_XL, T.SP_LG)
+        hk_ly.setSpacing(T.SP_MD)
+        hk_ly.addWidget(section_header("录制快捷键"))
+        hk_row = QHBoxLayout()
+        hk_row.setSpacing(T.SP_SM)
+        default_hk = self._settings.value("record/hotkey", "Key.f6")
+        self.hk_label = QLabel(f"停止快捷键: {default_hk.replace('Key.','').upper()}")
+        self.hk_label.setStyleSheet(f"font-size:13px; color:{T.TEXT2};")
+        hk_row.addWidget(self.hk_label)
+        hk_btn = btn_ghost("重新设置")
+        hk_btn.setCursor(Qt.PointingHandCursor)
+        hk_btn.clicked.connect(self._config_hotkey)
+        hk_row.addWidget(hk_btn)
+        hk_row.addStretch()
+        hk_ly.addLayout(hk_row)
+        ly.addWidget(self._set_card_hk)
+
+        ly.addStretch(1)
+        outer.addWidget(scroll, 1)
+        return w
+
+    def _refresh_settings_styles(self):
+        """Refresh the settings page inline styles."""
+        self._settings_page.setStyleSheet(f"background:{T.BG};")
+        for card in [self._set_card_options, self._set_card_sched, self._set_card_hk]:
+            card.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
+        if hasattr(self, 'hk_label'):
+            self.hk_label.setStyleSheet(f"font-size:13px; color:{T.TEXT2};")
+        if hasattr(self, 'sched_next'):
+            self.sched_next.setStyleSheet(f"font-size:11px; color:{T.TEXT3};")
 
     # ══════════════════════════════════════
     #  PAGE: 关于
@@ -1802,8 +2071,17 @@ class SmartRPAGUI(QMainWindow):
             for d in sorted(os.listdir(ex)):
                 fp = os.path.join(ex, d, "task.json")
                 if os.path.exists(fp):
-                    self._task_map[d] = fp
-                    self.task_combo.addItem(d)
+                    display = d
+                    try:
+                        with open(fp, encoding="utf-8") as f:
+                            data = json.load(f)
+                            meta = data.get("_meta", {})
+                            if isinstance(meta, dict) and meta.get("name"):
+                                display = meta["name"]
+                    except (json.JSONDecodeError, IOError):
+                        pass
+                    self._task_map[display] = fp
+                    self.task_combo.addItem(display)
 
         # Scan user data directory (timestamp folders, read _meta.name)
         user_dir = data_dir("tasks")
@@ -1936,6 +2214,151 @@ class SmartRPAGUI(QMainWindow):
             f'<span style="color:{T.LOG_TEXT}">{msg}</span>'
         )
 
+
+    # ── Recording ──
+
+    def _toggle_record(self):
+        if hasattr(self, '_recorder') and self._recorder and self._recorder.isRunning():
+            self._recorder.stop()
+            self.rec_btn.setText("⏺  录制")
+            self.rec_btn.setStyleSheet(f"""QPushButton{{background:{T.RED_BG};color:{T.RED};border:1px solid {T.RED}33;border-radius:{T.R_SM}px;padding:5px 14px;font-weight:600;font-size:12px;}}QPushButton:hover{{border:1px solid {T.RED}66;}}""")
+            self.showNormal()
+            self.log_msg("录制已停止", "WARN")
+            return
+        # Load hotkey from settings
+        stop_key = self._settings.value("record/hotkey", "Key.f6")
+        self._recorder = ActionRecorder(self, stop_key)
+        self._recorder.log.connect(self.log_msg)
+        self._recorder.finished.connect(self._on_record_finished)
+        self._recorder.start()
+        self.showMinimized()
+        self.rec_btn.setText("⏹  停止")
+        self.rec_btn.setStyleSheet(f"""QPushButton{{background:{T.RED};color:white;border:1px solid {T.RED}88;border-radius:{T.R_SM}px;padding:5px 14px;font-weight:600;font-size:12px;}}QPushButton:hover{{background:#e06060;}}""")
+        self.log_msg(f"开始录制 — 按 {stop_key.replace('Key.','')} 停止", "INFO")
+
+    def _config_hotkey(self):
+        """Let user configure the recording stop hotkey by pressing a key."""
+        self.log_msg("请按下一个按键作为停止录制快捷键（5秒内）...", "INFO")
+        import threading
+        from pynput import keyboard
+        result = [None]
+
+        def on_key(key):
+            result[0] = str(key)
+            return False  # stop listener
+
+        listener = keyboard.Listener(on_press=on_key)
+        listener.start()
+        listener.join(timeout=5.0)
+        listener.stop()
+
+        if result[0]:
+            key_str = result[0]
+            self._settings.setValue("record/hotkey", key_str)
+            self.hk_label.setText(f"停止: {key_str.replace('Key.','')}")
+            self.log_msg(f"停止快捷键已设为: {key_str.replace('Key.','')}", "SUCCESS")
+        else:
+            self.log_msg("未检测到按键，设置取消", "WARN")
+
+    def _on_record_finished(self, task_path):
+        self.rec_btn.setText("⏺  录制")
+        self.rec_btn.setStyleSheet(f"""QPushButton{{background:{T.RED_BG};color:{T.RED};border:1px solid {T.RED}33;border-radius:{T.R_SM}px;padding:5px 14px;font-weight:600;font-size:12px;}}QPushButton:hover{{border:1px solid {T.RED}66;}}""")
+        self.showNormal()
+        self.log_msg(f"录制完成，打开任务编辑器查看", "SUCCESS")
+        self._scan()
+        # Switch to editor page
+        self._switch_page(1)
+
+    # ── Export / Import ──
+
+    def _export_task(self):
+        """Export selected task as a zip file."""
+        current = self.task_combo.currentText()
+        path = self._task_map.get(current)
+        if not path:
+            self.log_msg("请先选择一个任务", "WARN")
+            return
+        import zipfile
+        task_dir = os.path.dirname(path)
+        default_name = f"{current.replace(' ', '_')}.zip"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "导出任务", default_name, "ZIP 文件 (*.zip)"
+        )
+        if not save_path:
+            return
+        try:
+            with zipfile.ZipFile(save_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for root, dirs, files in os.walk(task_dir):
+                    for fn in files:
+                        fp = os.path.join(root, fn)
+                        arcname = os.path.relpath(fp, task_dir)
+                        zf.write(fp, arcname)
+            self.log_msg(f"已导出: {save_path}", "SUCCESS")
+        except Exception as e:
+            self.log_msg(f"导出失败: {e}", "ERROR")
+
+    def _import_task(self):
+        """Import a task from a zip file."""
+        zip_path, _ = QFileDialog.getOpenFileName(
+            self, "导入任务", "", "ZIP 文件 (*.zip)"
+        )
+        if not zip_path:
+            return
+        import zipfile, tempfile, shutil
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                # Generate unique folder name
+                now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]
+                target = data_dir(f"tasks/{now}")
+                zf.extractall(target)
+            self.log_msg(f"已导入: {zip_path}", "SUCCESS")
+            self._scan()
+        except Exception as e:
+            self.log_msg(f"导入失败: {e}", "ERROR")
+
+    # ── Step editing enhancements ──
+
+    def _ed_edit_step(self):
+        """Edit the currently selected step's parameters."""
+        row = self.ed_list.currentRow()
+        if row < 0 or row >= len(self._ed):
+            self.log_msg("请先选中一个步骤", "WARN")
+            return
+        s = list(self._ed[row])
+        a = s[5]
+        if a == "click":
+            new_tpl, ok = QInputDialog.getText(self, "修改模板", "模板名:", text=s[0])
+            if ok and new_tpl.strip():
+                s[0] = new_tpl.strip()
+                self._ed[row] = tuple(s)
+                self._ed_refresh()
+        elif a == "wait":
+            new_s, ok = QInputDialog.getDouble(self, "修改等待", "秒:", float(s[0].replace("秒","")), 0.1, 60, 1)
+            if ok:
+                s[0] = f"{new_s:.1f}秒"
+                self._ed[row] = tuple(s)
+                self._ed_refresh()
+        elif a == "press":
+            new_k, ok = QInputDialog.getText(self, "修改按键", "按键名:", text=s[0])
+            if ok and new_k.strip():
+                s[0] = new_k.strip()
+                self._ed[row] = tuple(s)
+                self._ed_refresh()
+        elif a == "wait_until":
+            new_tpl, ok = QInputDialog.getText(self, "修改模板", "模板名:", text=s[0])
+            if ok and new_tpl.strip():
+                s[0] = new_tpl.strip()
+                self._ed[row] = tuple(s)
+                self._ed_refresh()
+
+    def _ed_copy_step(self):
+        """Copy the selected step."""
+        row = self.ed_list.currentRow()
+        if row < 0 or row >= len(self._ed):
+            self.log_msg("请先选中一个步骤", "WARN")
+            return
+        self._ed.insert(row + 1, self._ed[row])
+        self._ed_refresh()
 
 # ═══════════════════════════════════════════════
 #  Entry Point
