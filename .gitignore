@@ -35,4 +35,5 @@ tests/
 
 build_ico.py
 build.bat
+pack.bat
 SmartRPA.png

@@ -44,7 +44,10 @@ def resource_path(relative_path):
 def data_dir(subdir: str = "") -> str:
     """Get writable directory for user data (tasks, templates, etc.).
     Uses %APPDATA%/SmartRPA on Windows, ~/.smartrpa on other platforms.
-    Created automatically if it doesn't exist."""
+    Created automatically if it doesn't exist.
+
+    On first run from release zip, also copies data from
+    <exe_dir>/SmartRPA_data/ if present (seeded by pack.bat)."""
     if os.name == "nt":
         base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SmartRPA")
     else:
@@ -2065,28 +2068,47 @@ class SmartRPAGUI(QMainWindow):
         self._task_map.clear()
         self.task_combo.clear()
 
-        # Scan built-in examples (read-only, bundled with exe)
+        # Scan built-in examples & copy to user data on first run
         ex = resource_path("examples")
         if os.path.isdir(ex):
             for d in sorted(os.listdir(ex)):
-                fp = os.path.join(ex, d, "task.json")
-                if os.path.exists(fp):
-                    display = d
-                    try:
-                        with open(fp, encoding="utf-8") as f:
-                            data = json.load(f)
-                            meta = data.get("_meta", {})
-                            if isinstance(meta, dict) and meta.get("name"):
-                                display = meta["name"]
-                    except (json.JSONDecodeError, IOError):
-                        pass
-                    self._task_map[display] = fp
-                    self.task_combo.addItem(display)
+                src_fp = os.path.join(ex, d, "task.json")
+                if not os.path.exists(src_fp):
+                    continue
+                # Read display name from _meta.name, fallback to folder name
+                display = d
+                try:
+                    with open(src_fp, encoding="utf-8") as f:
+                        data = json.load(f)
+                        meta = data.get("_meta", {})
+                        if isinstance(meta, dict) and meta.get("name"):
+                            display = meta["name"]
+                except (json.JSONDecodeError, IOError):
+                    pass
+                # Ensure a copy exists in user data directory
+                user_task_dir = data_dir(f"tasks/{d}")
+                user_fp = os.path.join(user_task_dir, "task.json")
+                if not os.path.exists(user_fp):
+                    # Copy task.json
+                    import shutil
+                    os.makedirs(user_task_dir, exist_ok=True)
+                    shutil.copy2(src_fp, user_fp)
+                    # Copy built-in templates if any
+                    src_tpl = os.path.join(ex, d, "templates")
+                    if os.path.isdir(src_tpl):
+                        dst_tpl = os.path.join(user_task_dir, "templates")
+                        shutil.copytree(src_tpl, dst_tpl, dirs_exist_ok=True)
+                # Register the user data copy as the active path
+                self._task_map[display] = user_fp
+                self.task_combo.addItem(display)
 
         # Scan user data directory (timestamp folders, read _meta.name)
         user_dir = data_dir("tasks")
         if os.path.isdir(user_dir):
             for folder in sorted(os.listdir(user_dir)):
+                # Skip folders that match built-in example names (already mapped)
+                if os.path.isdir(os.path.join(ex, folder)) if os.path.isdir(ex) else False:
+                    continue
                 fp = os.path.join(user_dir, folder, "task.json")
                 if not os.path.exists(fp):
                     continue
