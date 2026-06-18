@@ -35,6 +35,7 @@ class TaskEngine:
 
         self._tasks: Dict[str, dict] = {}
         self._callbacks: Dict[str, Callable] = {}
+        self._vars: Dict[str, any] = {}  # Runtime variables
         self._running = False
         self._stats = {"steps": 0, "errors": 0, "popups_handled": 0}
 
@@ -250,6 +251,14 @@ class TaskEngine:
                     success = self._do_move(screenshot, params)
                 elif action == "hotkey":
                     success = self._do_hotkey(params)
+                elif action == "ocr":
+                    success = self._do_ocr(screenshot, params)
+                elif action == "find_text":
+                    success = self._do_find_text(screenshot, params)
+                elif action == "set_var":
+                    success = self._do_set_var(screenshot, params)
+                elif action == "log":
+                    success = self._do_log(params)
                 else:
                     logger.error(f"未知动作: {action}")
                     success = False
@@ -392,7 +401,16 @@ class TaskEngine:
         return result.found
 
     def _do_if(self, screenshot, params: dict) -> bool:
-        """条件判断"""
+        """
+        条件判断引擎 - 支持多种条件类型。
+
+        条件类型:
+          - find:       模板匹配检测
+          - find_text:  OCR 文字检测
+          - find_color: 颜色区域检测
+          - compare:    变量比较 (>, <, ==, !=, >=, <=)
+          - exists:     检查变量是否存在且非空
+        """
         condition = params.get("condition", {})
         cond_type = condition.get("type", "find")
 
@@ -403,7 +421,93 @@ class TaskEngine:
                                           condition.get("threshold", 0.8))
                 return result.found
 
+        elif cond_type == "find_text":
+            keyword = condition.get("keyword", "")
+            if keyword:
+                roi = condition.get("roi")
+                lang = condition.get("lang", "chi_sim+eng")
+                result = self.vision.find_text(screenshot, keyword, roi, lang)
+                return result.found
+
+        elif cond_type == "find_color":
+            target = condition.get("target")
+            if target and len(target) == 3:
+                tolerance = condition.get("tolerance", 40)
+                min_pct = condition.get("min_pct", 0.15)
+                roi = condition.get("roi")
+                result = self.vision.find_color_region(
+                    screenshot, tuple(target), tolerance, min_pct, roi)
+                return result.found
+
+        elif cond_type == "compare":
+            var_name = condition.get("var", "")
+            op = condition.get("op", "==")
+            value = condition.get("value")
+            actual = self._vars.get(var_name)
+            if actual is None:
+                return False
+            try:
+                if op == "==":  return actual == value
+                if op == "!=":  return actual != value
+                if op == ">":   return float(actual) > float(value)
+                if op == "<":   return float(actual) < float(value)
+                if op == ">=":  return float(actual) >= float(value)
+                if op == "<=":  return float(actual) <= float(value)
+            except (ValueError, TypeError):
+                return False
+
+        elif cond_type == "exists":
+            var_name = condition.get("var", "")
+            return var_name in self._vars and self._vars[var_name] is not None
+
         return False
+
+    def _do_set_var(self, screenshot, params: dict) -> bool:
+        """
+        设置运行时变量。
+        支持从不同来源取值：
+          - value: 直接赋值
+          - ocr:   从屏幕 OCR 识别结果赋值
+          - count: 模板匹配计数（find_all 结果数）
+        """
+        var_name = params.get("name", "")
+        if not var_name:
+            return False
+
+        source = params.get("from", "value")
+
+        if source == "value":
+            self._vars[var_name] = params.get("value")
+            logger.info(f"  └ 变量 {var_name} = {self._vars[var_name]}")
+            return True
+
+        elif source == "ocr":
+            roi = params.get("roi")
+            lang = params.get("lang", "chi_sim+eng")
+            text = self.vision.ocr(screenshot, roi, lang)
+            self._vars[var_name] = text
+            logger.info(f"  └ 变量 {var_name} (OCR) = {text[:80]}")
+            return True
+
+        elif source == "count":
+            template = params.get("template", "")
+            threshold = params.get("threshold", 0.8)
+            results = self.vision.find_all(screenshot, template, threshold)
+            self._vars[var_name] = len(results)
+            logger.info(f"  └ 变量 {var_name} (计数) = {len(results)}")
+            return True
+
+        return False
+
+    def _do_log(self, params: dict) -> bool:
+        """输出自定义日志消息（用于调试）"""
+        msg = params.get("msg", "")
+        if msg:
+            # Support variable interpolation
+            for k, v in self._vars.items():
+                msg = msg.replace(f"{{{k}}}", str(v))
+            logger.info(f"[LOG] {msg}")
+        return True
 
     def _do_exec(self, params: dict) -> bool:
         """执行终端命令（启动程序、打开链接等）"""
@@ -450,3 +554,28 @@ class TaskEngine:
         except Exception as e:
             logger.error(f"组合键失败: {e}")
             return False
+
+    def _do_ocr(self, screenshot, params: dict) -> bool:
+        """OCR 识别：读取屏幕文字并记录到日志"""
+        roi = params.get("roi")
+        lang = params.get("lang", "chi_sim+eng")
+        text = self.vision.ocr(screenshot, roi, lang)
+        if text:
+            logger.info(f"  └ OCR识别: {text[:100]}")
+            return True
+        logger.warning("  └ OCR未识别到文字")
+        return False
+
+    def _do_find_text(self, screenshot, params: dict) -> bool:
+        """查找屏幕文字：检测指定文字是否出现在屏幕上"""
+        keyword = params.get("keyword", "")
+        if not keyword:
+            return False
+        roi = params.get("roi")
+        lang = params.get("lang", "chi_sim+eng")
+        result = self.vision.find_text(screenshot, keyword, roi, lang)
+        if result.found:
+            logger.info(f"  └ 找到文字 '{keyword}' 在 ({result.x},{result.y})")
+            return True
+        logger.info(f"  └ 未找到文字 '{keyword}'")
+        return False

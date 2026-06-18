@@ -215,7 +215,98 @@ class Vision:
             ys, xs = np.where(mask > 0)
             return Found(found=True, x=off_x + int(xs.mean()) - 20, y=off_y + int(ys.mean()) - 20,
                          w=40, h=40, score=float(pct), label=f"color_{target_color}")
-        return Found(found=False)
+            return Found(found=False)
+
+    # ========== OCR 文字识别 ==========
+
+    def ocr(self, image: np.ndarray,
+            roi: Tuple[int, int, int, int] = None,
+            lang: str = 'chi_sim+eng',
+            psm: int = 7) -> str:
+        """
+        对屏幕区域执行 OCR 文字识别。
+        返回识别到的文本，空字符串表示未识别到内容。
+
+        Args:
+            image: 屏幕截图（BGR numpy array）
+            roi: 识别区域 (x, y, w, h)，None = 全屏
+            lang: 语言包，默认中英文
+            psm: Tesseract 页面分割模式（7=单行，3=自动）
+        """
+        import pytesseract as _pyt
+        import os
+        if not _pyt.pytesseract.tesseract_cmd or not os.path.exists(str(_pyt.pytesseract.tesseract_cmd)):
+            for p in [r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                      r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"]:
+                if os.path.exists(p):
+                    _pyt.pytesseract.tesseract_cmd = p
+                    break
+        if roi:
+            x, y, w, h = roi
+            search = image[y:y+h, x:x+w]
+        else:
+            search = image
+        if search.size == 0:
+            return ""
+        # pytesseract 需要 BGR→RGB 转换
+        rgb = cv2.cvtColor(search, cv2.COLOR_BGR2RGB)
+        config = f'--psm {psm} --oem 3'
+        try:
+            text = _pyt.image_to_string(rgb, lang=lang, config=config)
+            return text.strip()
+        except Exception:
+            return ""
+
+    def find_text(self, image: np.ndarray, keyword: str,
+                  roi: Tuple[int, int, int, int] = None,
+                  lang: str = 'chi_sim+eng',
+                  psm: int = 7) -> Found:
+        """
+        在屏幕区域中搜索指定的文字。
+        如果找到包含 keyword 的文本，返回 Found（包含位置信息）。
+        如果未找到，返回 Found(found=False)。
+
+        Args:
+            image: 屏幕截图
+            keyword: 要搜索的文字（支持子串匹配）
+            roi: 搜索区域
+            lang: 语言
+            psm: 页面分割模式
+        """
+        import pytesseract as _pyt
+        import os
+        if not _pyt.pytesseract.tesseract_cmd or not os.path.exists(str(_pyt.pytesseract.tesseract_cmd)):
+            for p in [r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                      r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"]:
+                if os.path.exists(p):
+                    _pyt.pytesseract.tesseract_cmd = p
+                    break
+        if roi:
+            x, y, w, h = roi
+            search = image[y:y+h, x:x+w]
+        else:
+            search = image
+            x, y = 0, 0
+        if search.size == 0:
+            return Found(found=False)
+
+        rgb = cv2.cvtColor(search, cv2.COLOR_BGR2RGB)
+        config = f'--psm {psm} --oem 3'
+        try:
+            # Get detailed OCR data with bounding boxes
+            data = _pyt.image_to_data(rgb, lang=lang, config=config, output_type=_pyt.Output.DICT)
+            for i, text in enumerate(data.get('text', [])):
+                if keyword in text:
+                    fx = x + data['left'][i]
+                    fy = y + data['top'][i]
+                    fw = data['width'][i]
+                    fh = data['height'][i]
+                    return Found(found=True, x=fx, y=fy, w=fw, h=fh,
+                                 score=float(data['conf'][i]) / 100.0,
+                                 label=f"text:{keyword}")
+            return Found(found=False, label=f"text_not_found:{keyword}")
+        except Exception:
+            return Found(found=False)
 
     def detect_overlay(self, image: np.ndarray,
                        roi: Tuple[int, int, int, int] = None) -> Found:

@@ -69,8 +69,9 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon, QMenu, QDateTimeEdit,
     QMessageBox,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QRect, QTimer, QSettings
-from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon, QPixmap
+from PySide6.QtCore import Qt, QThread, Signal, QRect, QTimer, QSettings, Slot
+from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon, QPixmap, QDesktopServices
+from PySide6.QtCore import QUrl
 
 from smartrpa import Controller, Vision, TaskEngine, PopupHandler, __version__
 from callback_2048 import callback_2048
@@ -922,6 +923,39 @@ class SmartRPAGUI(QMainWindow):
         self.setWindowIcon(QIcon(resource_path("SmartRPA.ico")))
         self.resize(1160, 760)
         self.setMinimumSize(940, 600)
+        # Restore schedule task name
+        saved_task = self._settings.value("schedule/task", "")
+        if saved_task:
+            idx = self.task_combo.findText(saved_task)
+            if idx >= 0:
+                self.task_combo.setCurrentIndex(idx)
+        # Restore schedule frequency and time
+        saved_freq = self._settings.value("schedule/freq", "每天")
+        idx = self.sched_combo.findText(saved_freq)
+        if idx >= 0:
+            self.sched_combo.setCurrentIndex(idx)
+        saved_time = self._settings.value("schedule/time", "")
+        if saved_time:
+            from PySide6.QtCore import QTime
+            self.sched_time.setTime(QTime.fromString(saved_time, "HH:mm"))
+        # Check for updates on startup (non-blocking)
+        self._check_version()
+        # Start global hotkey listener
+        self._start_global_hotkey()
+
+    def closeEvent(self, event):
+        """Override close: minimize to tray if schedule is active."""
+        if hasattr(self, 'sched_cb') and self.sched_cb.isChecked():
+            self.hide()
+            self._tray.showMessage(
+                "SmartRPA",
+                "定时已启用，程序继续在后台运行",
+                QSystemTrayIcon.MessageIcon.Information, 2000
+            )
+            event.ignore()
+        else:
+            event.accept()
+        self._stop_global_hotkey()
 
     def _build(self):
         cw = QWidget()
@@ -1033,6 +1067,10 @@ class SmartRPAGUI(QMainWindow):
         self.status_lbl = QLabel(" 选择任务后点击「开始运行」")
         self.status_lbl.setStyleSheet(f"color:{T.TEXT3};")
         self.status.addWidget(self.status_lbl, 1)
+        self.version_lbl = QLabel(f"v{__version__}")
+        self.version_lbl.setStyleSheet(f"color:{T.TEXT3}; font-size:11px; padding:0 8px;")
+        self.version_lbl.setCursor(Qt.PointingHandCursor)
+        self.status.addPermanentWidget(self.version_lbl)
         self.setStatusBar(self.status)
 
         root.addWidget(self.right_widget, 1)
@@ -1107,6 +1145,13 @@ class SmartRPAGUI(QMainWindow):
 
         # Bottom status bar
         self.status_lbl.setStyleSheet(f"color:{T.TEXT3};")
+        if hasattr(self, 'version_lbl'):
+            cur_text = self.version_lbl.text()
+            if cur_text.startswith("⬆"):
+                self.version_lbl.setStyleSheet(
+                    f"color:{T.ACCENT2}; font-size:11px; font-weight:600; padding:0 8px; text-decoration:underline;")
+            else:
+                self.version_lbl.setStyleSheet(f"color:{T.TEXT3}; font-size:11px; padding:0 8px;")
 
         # Nav buttons
         for i, btn in enumerate(self.nav_btns):
@@ -1211,8 +1256,8 @@ class SmartRPAGUI(QMainWindow):
             self.ed_list.setStyleSheet(f"""QListWidget{{background:{T.SURFACE};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_MD}px;padding:8px;font-size:12px;outline:none;}}QListWidget::item{{padding:6px 10px;border-radius:4px;}}QListWidget::item:selected{{background:{T.ACCENT_DIM};color:{T.TEXT};}}QListWidget::item:hover{{background:{T.CARD_HOVER};}}""")
 
         # Editor loop spinbox
-        if hasattr(self, 'ed_loop'):
-            self.ed_loop.setStyleSheet(f"QSpinBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.GREEN}44;}}")
+        if hasattr(self, 'run_loop'):
+            self.run_loop.setStyleSheet(f"QSpinBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.GREEN}44;}}")
 
         # Preview label
         if hasattr(self, '_ed_preview'):
@@ -1270,10 +1315,20 @@ class SmartRPAGUI(QMainWindow):
 
     def _on_sched_toggle(self, enabled):
         self._settings.setValue("schedule/enabled", enabled)
+        self._settings.setValue("schedule/freq", self.sched_combo.currentText())
+        self._settings.setValue("schedule/time", self.sched_time.time().toString("HH:mm"))
+        # Save current task name
+        task_name = self.task_combo.currentText()
+        if task_name and enabled:
+            self._settings.setValue("schedule/task", task_name)
         if enabled:
             self._update_sched_next()
+            self._tray.setToolTip(f"SmartRPA - 定时已启用 ({self.sched_combo.currentText()} {self.sched_time.time().toString('HH:mm')})")
+            self.showMinimized()
+            self.log_msg(f"定时已启用: {self.sched_combo.currentText()} {self.sched_time.time().toString('HH:mm')} - 任务: {task_name}", "INFO")
         else:
             self.sched_next.setText("")
+            self._tray.setToolTip("SmartRPA")
 
     def _calc_next_run(self):
         from datetime import datetime, timedelta
@@ -1297,8 +1352,83 @@ class SmartRPAGUI(QMainWindow):
         from datetime import datetime
         nxt = self._calc_next_run()
         if nxt and datetime.now() >= nxt:
+            # Run the scheduled task (not necessarily the currently selected one)
+            sched_task = self._settings.value("schedule/task", "")
+            if sched_task and sched_task in self._task_map:
+                idx = self.task_combo.findText(sched_task)
+                if idx >= 0:
+                    self.task_combo.setCurrentIndex(idx)
             self.log_msg("定时触发: 自动开始运行", "INFO")
             self._start()
+
+    def _check_version(self, force_notify=False):
+        """Background thread: check GitHub for newer release."""
+        repo = "virmuran/SmartRPA"
+        import threading
+
+        def _do_check():
+            import json, urllib.request, ssl
+            url = f"https://api.github.com/repos/{repo}/releases/latest"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "SmartRPA/0.5"})
+                # Try to use system proxy if available
+                proxy_handler = urllib.request.ProxyHandler()
+                opener = urllib.request.build_opener(proxy_handler)
+                with opener.open(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode())
+                    latest = data.get("tag_name", "").lstrip("v")
+
+                    # Compare versions
+                    cur = tuple(int(x) for x in __version__.split("."))
+                    lat = tuple(int(x) for x in latest.split("."))
+                    if lat > cur:
+                        self._on_new_version(latest, data.get("html_url", url))
+                    elif force_notify:
+                        self._on_no_update()
+            except Exception as e:
+                if force_notify:
+                    # If check failed but user clicked button, offer to open browser
+                    self._on_check_failed_with_option()
+
+        threading.Thread(target=_do_check, daemon=True).start()
+
+    def _on_new_version(self, latest, url):
+        """Called from background thread; schedule UI update on main thread."""
+        from PySide6.QtCore import QMetaObject, Qt, Q_ARG
+        QMetaObject.invokeMethod(
+            self, "_show_update_banner",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, latest), Q_ARG(str, url)
+        )
+
+    @Slot(str, str)
+    def _show_update_banner(self, latest, url):
+        self.version_lbl.setText(f"⬆ v{latest} 可用")
+        self.version_lbl.setStyleSheet(
+            f"color:{T.ACCENT2}; font-size:11px; font-weight:600; padding:0 8px; text-decoration:underline;")
+        self.version_lbl.setToolTip(f"点击下载 SmartRPA v{latest}")
+        self.version_lbl.mousePressEvent = lambda e: QDesktopServices.openUrl(QUrl(url))
+        if hasattr(self, '_update_status'):
+            self._update_status.setText(f"发现新版本 v{latest}")
+            self._update_status.setStyleSheet(f"font-size:12px; color:{T.ACCENT2}; font-weight:600;")
+            self._update_status.mousePressEvent = lambda e: QDesktopServices.openUrl(QUrl(url))
+            self._update_status.setCursor(Qt.PointingHandCursor)
+        self.log_msg(f"新版本 v{latest} 可用，点击状态栏下载", "INFO")
+
+    @Slot()
+    def _on_no_update(self):
+        self._update_status.setText("已是最新版 ✓")
+        self._update_status.setStyleSheet(f"font-size:12px; color:{T.GREEN};")
+        self.log_msg(f"当前已是 v{__version__} 最新版", "SUCCESS")
+
+    @Slot()
+    def _on_check_failed_with_option(self):
+        self._update_status.setText("检查失败，点此手动查看")
+        self._update_status.setStyleSheet(f"font-size:12px; color:{T.ORANGE}; text-decoration:underline;")
+        repo_url = "https://github.com/virmuran/SmartRPA/releases"
+        self._update_status.mousePressEvent = lambda e: QDesktopServices.openUrl(QUrl(repo_url))
+        self._update_status.setCursor(Qt.PointingHandCursor)
+        self.log_msg("版本检查失败（网络/代理），可手动查看 Releases", "WARN")
 
     # ══════════════════════════════════════
     #  PAGE: 自动化任务 (3-column Bento)
@@ -1436,6 +1566,22 @@ class SmartRPAGUI(QMainWindow):
         rb.addWidget(region_btn)
         Cl.addLayout(rb)
 
+        # Loop count
+        Cl.addWidget(section_title("重复"))
+        lr = QHBoxLayout()
+        lr.setSpacing(T.SP_SM)
+        self.run_loop = QSpinBox()
+        self.run_loop.setRange(1, 9999)
+        self.run_loop.setValue(1)
+        self.run_loop.setFixedWidth(80)
+        self.run_loop.setStyleSheet(f"QSpinBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.GREEN}44;}}")
+        lr.addWidget(self.run_loop)
+        tl = QLabel("次")
+        tl.setStyleSheet(f"font-size:13px;font-weight:500;color:{T.TEXT2};")
+        lr.addWidget(tl)
+        lr.addStretch()
+        Cl.addLayout(lr)
+
         Cl.addStretch(1)
 
         # Run / Stop toggle at bottom of config panel
@@ -1459,7 +1605,16 @@ class SmartRPAGUI(QMainWindow):
         Rl.setContentsMargins(T.SP_LG, T.SP_XL, T.SP_LG, T.SP_LG)
         Rl.setSpacing(T.SP_MD)
 
-        Rl.addWidget(section_header("日志"))
+        # Log header with inline copy button
+        log_header = QHBoxLayout()
+        log_header.setSpacing(T.SP_SM)
+        log_header.addWidget(section_header("日志"))
+        log_header.addStretch()
+        copy_btn = btn_ghost("复制")
+        copy_btn.setToolTip("复制日志到剪贴板")
+        copy_btn.clicked.connect(self._copy_log)
+        log_header.addWidget(copy_btn)
+        Rl.addLayout(log_header)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setStyleSheet(f"""
@@ -1589,17 +1744,6 @@ class SmartRPAGUI(QMainWindow):
         self._ed_preview.setAlignment(Qt.AlignCenter)
         self._ed_preview.setStyleSheet(f"background:{T.SURFACE};color:{T.TEXT3};border:1px solid {T.LINE};border-radius:{T.R_SM}px;font-size:11px;")
         left_ly.addWidget(self._ed_preview)
-
-        loop_row = QHBoxLayout(); loop_row.setSpacing(T.SP_SM)
-        loop_label = QLabel("循环")
-        loop_label.setStyleSheet(f"font-size:13px;font-weight:700;color:{T.TEXT};")
-        loop_row.addWidget(loop_label)
-        self.ed_loop = QSpinBox(); self.ed_loop.setRange(1,9999); self.ed_loop.setValue(1); self.ed_loop.setFixedWidth(80)
-        self.ed_loop.setStyleSheet(f"QSpinBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.GREEN}44;}}")
-        loop_row.addWidget(self.ed_loop)
-        times_label = QLabel("次")
-        times_label.setStyleSheet(f"font-size:13px;font-weight:500;color:{T.TEXT2};")
-        loop_row.addWidget(times_label); loop_row.addStretch(); left_ly.addLayout(loop_row)
 
         del_row = QHBoxLayout(); del_row.setSpacing(T.SP_SM)
         del_btn = btn_ghost("删"); del_btn.setToolTip("删除选中步骤")
@@ -1738,6 +1882,56 @@ class SmartRPAGUI(QMainWindow):
         hk_ly.addLayout(hk_row)
         ly.addWidget(self._set_card_hk)
 
+        # ── Card: 全局快捷键 ──
+        self._set_card_ghk = QWidget()
+        self._set_card_ghk.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
+        ghk_ly = QVBoxLayout(self._set_card_ghk)
+        ghk_ly.setContentsMargins(T.SP_XL, T.SP_LG, T.SP_XL, T.SP_LG)
+        ghk_ly.setSpacing(T.SP_MD)
+        ghk_ly.addWidget(section_header("全局快捷键"))
+        ghk_row = QHBoxLayout()
+        ghk_row.setSpacing(T.SP_SM)
+        default_ghk = self._settings.value("global_hotkey", "<ctrl>+<shift>+r")
+        self.ghk_label = QLabel(f"运行任务: {default_ghk.replace('<','').replace('>','').upper()}")
+        self.ghk_label.setStyleSheet(f"font-size:13px; color:{T.TEXT2};")
+        ghk_row.addWidget(self.ghk_label)
+        ghk_btn = btn_ghost("设置")
+        ghk_btn.setCursor(Qt.PointingHandCursor)
+        ghk_btn.clicked.connect(self._config_global_hotkey)
+        ghk_row.addWidget(ghk_btn)
+        ghk_row.addStretch()
+        ghk_ly.addLayout(ghk_row)
+        ly.addWidget(self._set_card_ghk)
+
+        # ── Card: 版本 ──
+        self._set_card_version = QWidget()
+        self._set_card_version.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
+        ver_ly = QVBoxLayout(self._set_card_version)
+        ver_ly.setContentsMargins(T.SP_XL, T.SP_LG, T.SP_XL, T.SP_LG)
+        ver_ly.setSpacing(T.SP_MD)
+        ver_ly.addWidget(section_header(f"版本 {__version__}"))
+        ver_row = QHBoxLayout()
+        ver_row.setSpacing(T.SP_SM)
+        update_btn = QPushButton("检查更新")
+        update_btn.setCursor(Qt.PointingHandCursor)
+        update_btn.setMinimumHeight(32)
+        update_btn.clicked.connect(lambda: self._check_version(force_notify=True))
+        update_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {T.ACCENT_DIM}; color: {T.TEXT};
+                border: 1px solid {T.ACCENT}33; border-radius: {T.R_SM}px;
+                padding: 5px 14px; font-weight: 600; font-size: 12px;
+            }}
+            QPushButton:hover {{ border: 1px solid {T.ACCENT}66; }}
+        """)
+        ver_row.addWidget(update_btn)
+        self._update_status = QLabel("")
+        self._update_status.setStyleSheet(f"font-size:12px; color:{T.TEXT3};")
+        ver_row.addWidget(self._update_status)
+        ver_row.addStretch()
+        ver_ly.addLayout(ver_row)
+        ly.addWidget(self._set_card_version)
+
         ly.addStretch(1)
         outer.addWidget(scroll, 1)
         return w
@@ -1745,7 +1939,7 @@ class SmartRPAGUI(QMainWindow):
     def _refresh_settings_styles(self):
         """Refresh the settings page inline styles."""
         self._settings_page.setStyleSheet(f"background:{T.BG};")
-        for card in [self._set_card_options, self._set_card_sched, self._set_card_hk]:
+        for card in [self._set_card_options, self._set_card_sched, self._set_card_hk, self._set_card_ghk, self._set_card_version]:
             card.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
         if hasattr(self, 'hk_label'):
             self.hk_label.setStyleSheet(f"font-size:13px; color:{T.TEXT2};")
@@ -1967,7 +2161,7 @@ class SmartRPAGUI(QMainWindow):
         os.makedirs(d, exist_ok=True)
 
         # Store meta info (display name, timestamps)
-        tasks, loop = {}, self.ed_loop.value()
+        tasks, loop = {}, self.run_loop.value()
         tasks["_meta"] = {
             "name": name,
             "created": now,
@@ -2205,11 +2399,22 @@ class SmartRPAGUI(QMainWindow):
     def _done(self, stats):
         self.showNormal()
         self._reset()
-        self.log_msg(
-            f"完成: {stats['steps']}步 {stats['popups_handled']}弹窗 {stats['errors']}错误",
-            "SUCCESS"
-        )
+        msg = f"完成: {stats['steps']}步 {stats['popups_handled']}弹窗 {stats['errors']}错误"
+        self.log_msg(msg, "SUCCESS")
         self.status_lbl.setText(f" 完成 — {stats['steps']}步骤")
+        # 错误通知
+        if stats['errors'] > 0:
+            self._tray.showMessage(
+                "SmartRPA - 任务有错误",
+                f"{stats['errors']}个错误，共{stats['steps']}步",
+                QSystemTrayIcon.MessageIcon.Warning, 5000
+            )
+        elif stats['steps'] > 0:
+            self._tray.showMessage(
+                "SmartRPA - 任务完成",
+                f"{stats['steps']}步 全部成功",
+                QSystemTrayIcon.MessageIcon.Information, 3000
+            )
 
     def _reset(self):
         self._running = False
@@ -2220,6 +2425,15 @@ class SmartRPAGUI(QMainWindow):
         self.pulse_dot.set_color(T.TEXT3)
         self.state_lbl.setText("就绪")
         self.state_lbl.setStyleSheet(f"color:{T.TEXT2}; font-size:12px; font-weight:500; padding: 0 8px 0 4px;")  # ← 自定义状态文字字号（就绪）
+
+    def _copy_log(self):
+        """Copy log content to clipboard."""
+        html = self.log.toHtml()
+        import re
+        text = re.sub(r'<[^>]+>', '', html)
+        text = re.sub(r'\n\s*\n', '\n', text).strip()
+        QApplication.clipboard().setText(text)
+        self.log_msg("日志已复制到剪贴板", "SUCCESS")
 
     def log_msg(self, msg, level="INFO"):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -2279,6 +2493,80 @@ class SmartRPAGUI(QMainWindow):
             self._settings.setValue("record/hotkey", key_str)
             self.hk_label.setText(f"停止: {key_str.replace('Key.','')}")
             self.log_msg(f"停止快捷键已设为: {key_str.replace('Key.','')}", "SUCCESS")
+        else:
+            self.log_msg("未检测到按键，设置取消", "WARN")
+
+    # ── Global Hotkey ──
+
+    def _start_global_hotkey(self):
+        """Start background global hotkey listener."""
+        import threading
+        from pynput import keyboard as kb
+
+        def on_activate():
+            from PySide6.QtCore import QMetaObject, Qt
+            QMetaObject.invokeMethod(self, "_on_global_hotkey", Qt.ConnectionType.QueuedConnection)
+
+        hotkey_str = self._settings.value("global_hotkey", "<ctrl>+<shift>+r")
+        try:
+            self._ghk_listener = kb.GlobalHotKeys({hotkey_str: on_activate})
+            self._ghk_listener.daemon = True
+            self._ghk_listener.start()
+        except Exception as e:
+            self.log_msg(f"全局快捷键启动失败: {e}", "WARN")
+
+    def _stop_global_hotkey(self):
+        if hasattr(self, '_ghk_listener') and self._ghk_listener:
+            self._ghk_listener.stop()
+            self._ghk_listener = None
+
+    @Slot()
+    def _on_global_hotkey(self):
+        """Global hotkey pressed: show window or start task."""
+        if self.isHidden() or self.isMinimized():
+            self.showNormal()
+            self.activateWindow()
+        elif not self._running:
+            self.log_msg("全局快捷键: 开始运行", "INFO")
+            self._start()
+
+    def _config_global_hotkey(self):
+        """Let user configure global hotkey by pressing a key combo."""
+        self.log_msg("请按下新的全局快捷键（如 Ctrl+Shift+R），5秒内...", "INFO")
+        import threading
+        from pynput import keyboard
+
+        result = [None]
+        def on_release(key):
+            result[0] = str(key)
+            return False
+
+        listener = keyboard.Listener(on_release=on_release)
+        listener.start()
+        listener.join(timeout=5.0)
+        listener.stop()
+
+        if result[0]:
+            key_str = result[0]
+            # Map pynput key names to GlobalHotKeys format
+            key_map = {
+                "Key.ctrl_l": "<ctrl>", "Key.ctrl_r": "<ctrl>",
+                "Key.shift_l": "<shift>", "Key.shift_r": "<shift>",
+                "Key.alt_l": "<alt>", "Key.alt_r": "<alt>",
+                "Key.cmd": "<cmd>",
+            }
+            parts = key_str.split("+")
+            mapped = []
+            for p in parts:
+                p = p.strip()
+                mapped.append(key_map.get(p, p.replace("Key.", "").lower()))
+            hotkey_str = "+".join(mapped)
+            self._settings.setValue("global_hotkey", hotkey_str)
+            self.ghk_label.setText(f"运行任务: {hotkey_str.replace('<','').replace('>','').upper()}")
+            # Restart listener with new hotkey
+            self._stop_global_hotkey()
+            self._start_global_hotkey()
+            self.log_msg(f"全局快捷键已设为: {hotkey_str}", "SUCCESS")
         else:
             self.log_msg("未检测到按键，设置取消", "WARN")
 
