@@ -1,10 +1,18 @@
 {
-    "_comment": "2048 AI - 使用回调函数实时决策",
-    "GameLoop": {
-        "desc": "AI主循环",
+    "_meta": { "name": "2048 AI 自动玩" },
+    "_comment": "OCR识别棋盘 → AI决策 → 方向键操作，自动循环直到游戏结束",
+    "_howto": "1. 打开 2048 游戏网页（如 https://play2048.co）",
+    "_howto2": "2. 在「操作区域」框选棋盘区域（4×4 格子区域）",
+    "_howto3": "3. 点击「开始运行」，AI 自动玩",
+    "_howto4": "4. 随时可点停止中断",
+
+    "_flow": "框选棋盘区域 → 开始运行 → AI自动玩直到结束",
+
+    "Play2048": {
+        "desc": "2048 AI 每帧: OCR→决策→按键",
         "action": "callback",
         "params": { "name": "play_2048" },
-        "next": ["GameLoop"],
+        "next": ["Play2048"],
         "humanDelay": "think"
     }
 }

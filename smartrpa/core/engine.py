@@ -305,7 +305,11 @@ class TaskEngine:
             result = self.vision.find(screenshot, template, threshold, roi,
                                       use_multi_scale, use_multi_angle)
             if result.found:
-                self.controller.click(result.center[0] - dx, result.center[1] - dy)
+                cx, cy = result.center
+                self.controller.click(cx - dx, cy - dy)
+                # 点击后验证
+                if params.get("verify"):
+                    return self._verify_click(template, threshold, params["verify"])
                 return True
             else:
                 logger.warning(f"  └ 未找到: {template} (阈值={threshold})")
@@ -314,6 +318,49 @@ class TaskEngine:
         x = params.get("x", 0) - dx
         y = params.get("y", 0) - dy
         self.controller.click(x, y)
+        return True
+
+    def _verify_click(self, template: str, threshold: float, cfg: dict) -> bool:
+        """
+        点击后验证：等待目标出现或消失。
+        cfg:
+          disappear: true   → 等待模板消失（如弹窗关闭）
+          appear: "xxx"     → 等待 xxx 模板出现（如新弹窗）
+          timeout: 2.0      → 最长等待（秒）
+          retry: 3          → 最多检测次数
+        """
+        import time, math
+        timeout = cfg.get("timeout", 2.0)
+        retries = cfg.get("retry", 3)
+        interval = timeout / max(retries, 1)
+
+        if cfg.get("disappear"):
+            # 等待模板消失
+            logger.info(f"  └ 验证: 等待 {template} 消失")
+            for i in range(retries):
+                time.sleep(interval)
+                ss = self.controller.screenshot()
+                r = self.vision.find(ss, template, threshold)
+                if not r.found:
+                    logger.info(f"  └ 验证通过: {template} 已消失")
+                    return True
+            logger.warning(f"  └ 验证失败: {template} 未消失")
+            return False
+
+        elif cfg.get("appear"):
+            appear_tpl = cfg["appear"]
+            appear_th = cfg.get("appear_threshold", threshold)
+            logger.info(f"  └ 验证: 等待 {appear_tpl} 出现")
+            for i in range(retries):
+                time.sleep(interval)
+                ss = self.controller.screenshot()
+                r = self.vision.find(ss, appear_tpl, appear_th)
+                if r.found:
+                    logger.info(f"  └ 验证通过: {appear_tpl} 已出现")
+                    return True
+            logger.warning(f"  └ 验证失败: {appear_tpl} 未出现")
+            return False
+
         return True
 
     def _do_press(self, params: dict) -> bool:

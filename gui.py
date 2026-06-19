@@ -494,6 +494,7 @@ class TaskWorker(QThread):
 
             def hook(ss, t):
                 if not self._active:
+                    engine.stop()
                     return False
                 cnt[0] += 1
                 self.step.emit(t.get("desc", ""))

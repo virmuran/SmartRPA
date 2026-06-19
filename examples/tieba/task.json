@@ -85,7 +85,11 @@
     "CloseResult": {
         "desc": "关闭签到结果弹窗",
         "action": "click",
-        "params": { "template": "close_popup", "threshold": 0.75 },
+        "params": {
+            "template": "close_popup",
+            "threshold": 0.75,
+            "verify": { "disappear": true, "timeout": 2.0, "retry": 4 }
+        },
         "next": ["WaitClose"],
         "retry": { "count": 2, "interval": 1.0 },
         "humanDelay": "transition"
