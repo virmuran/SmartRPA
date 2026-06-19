@@ -74,7 +74,7 @@ from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon,
 from PySide6.QtCore import QUrl
 
 from smartrpa import Controller, Vision, TaskEngine, PopupHandler, __version__
-from callback_2048 import callback_2048
+
 
 
 # ═══════════════════════════════════════════════
@@ -483,9 +483,6 @@ class TaskWorker(QThread):
             engine = TaskEngine(c, v, p)
             engine.region = self.region
             engine._user_log = lambda m, l: self.log.emit(m, l)
-            if self.region:
-                callback_2048._palette = None
-                engine.on("play_2048", callback_2048)
             engine.load(self.task_file)
             entry = list(engine._tasks.keys())[0]
             self.log.emit(f"任务: {os.path.basename(self.task_file)}", "INFO")
@@ -2260,6 +2257,7 @@ class SmartRPAGUI(QMainWindow):
 
     def _scan(self):
         """Scan both built-in examples and user data directory for tasks."""
+        import shutil
         self._task_map.clear()
         self.task_combo.clear()
 
@@ -2285,14 +2283,19 @@ class SmartRPAGUI(QMainWindow):
                 user_fp = os.path.join(user_task_dir, "task.json")
                 if not os.path.exists(user_fp):
                     # Copy task.json
-                    import shutil
                     os.makedirs(user_task_dir, exist_ok=True)
                     shutil.copy2(src_fp, user_fp)
-                    # Copy built-in templates if any
-                    src_tpl = os.path.join(ex, d, "templates")
-                    if os.path.isdir(src_tpl):
-                        dst_tpl = os.path.join(user_task_dir, "templates")
-                        shutil.copytree(src_tpl, dst_tpl, dirs_exist_ok=True)
+                # Always sync templates (user may add new screenshots later)
+                src_tpl = os.path.join(ex, d, "templates")
+                if os.path.isdir(src_tpl):
+                    dst_tpl = os.path.join(user_task_dir, "templates")
+                    os.makedirs(dst_tpl, exist_ok=True)
+                    for fname in os.listdir(src_tpl):
+                        s = os.path.join(src_tpl, fname)
+                        d = os.path.join(dst_tpl, fname)
+                        if os.path.isfile(s) and (not os.path.exists(d) or
+                                                   os.path.getmtime(s) > os.path.getmtime(d)):
+                            shutil.copy2(s, d)
                 # Register the user data copy as the active path
                 self._task_map[display] = user_fp
                 self.task_combo.addItem(display)
