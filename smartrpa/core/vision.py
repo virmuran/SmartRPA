@@ -32,7 +32,7 @@ class Found:
 class Vision:
     """视觉识别器（多尺度+多角度匹配、颜色触发检测）"""
 
-    DEFAULT_SCALES = [0.8, 0.9, 1.0, 1.1, 1.2]
+    DEFAULT_SCALES = [0.6, 0.8, 1.0, 1.2, 1.5]
     DEFAULT_ANGLES = [-10, -5, 0, 5, 10]
 
     def __init__(self, template_dir: str = None):

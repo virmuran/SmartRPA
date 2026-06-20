@@ -74,7 +74,7 @@ from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon,
 from PySide6.QtCore import QUrl
 
 from smartrpa import Controller, Vision, TaskEngine, PopupHandler, __version__
-
+from callback_fishing import callback_bd2_fishing
 
 
 # ═══════════════════════════════════════════════
@@ -463,12 +463,13 @@ def status_pill(text, color=None, bg=None):
 class TaskWorker(QThread):
     log = Signal(str, str); finished = Signal(dict); step = Signal(str)
 
-    def __init__(self, task_file, tpl_dir=None, no_popup=False, region=None):
+    def __init__(self, task_file, tpl_dir=None, no_popup=False, region=None, fast_mode=False):
         super().__init__()
         self.task_file = task_file
         self.tpl_dir = tpl_dir
         self.no_popup = no_popup
         self.region = region
+        self.fast_mode = fast_mode
         self._active = True
 
     def run(self):
@@ -483,8 +484,16 @@ class TaskWorker(QThread):
             engine = TaskEngine(c, v, p)
             engine.region = self.region
             engine._user_log = lambda m, l: self.log.emit(m, l)
+            if self.fast_mode:
+                engine.controller.human.fast_mode = True
+            engine.on("bd2_fishing", callback_bd2_fishing)
             engine.load(self.task_file)
             entry = list(engine._tasks.keys())[0]
+            # 窗口锚定：从 _meta 读取 window 标题
+            win_title = engine._meta.get("window")
+            if win_title:
+                engine.set_window_title(win_title)
+                self.log.emit(f"窗口锚定: '{win_title}'", "INFO")
             self.log.emit(f"任务: {os.path.basename(self.task_file)}", "INFO")
             orig = engine._execute_step
             cnt = [0]
@@ -1580,6 +1589,20 @@ class SmartRPAGUI(QMainWindow):
         lr.addStretch()
         Cl.addLayout(lr)
 
+        # Speed mode toggle
+        speed_row = QHBoxLayout()
+        speed_row.setSpacing(T.SP_SM)
+        speed_row.addWidget(section_title("速度"))
+        self.fast_toggle = QPushButton("⚡ 极速")
+        self.fast_toggle.setCheckable(True)
+        self.fast_toggle.setCursor(Qt.PointingHandCursor)
+        self.fast_toggle.setMinimumHeight(30)
+        self.fast_toggle.toggled.connect(self._on_speed_toggle)
+        self._update_speed_btn_style(False)
+        speed_row.addWidget(self.fast_toggle)
+        speed_row.addStretch()
+        Cl.addLayout(speed_row)
+
         Cl.addStretch(1)
 
         # Run / Stop toggle at bottom of config panel
@@ -1672,6 +1695,26 @@ class SmartRPAGUI(QMainWindow):
                     background: {T.LINE};
                     color: {T.TEXT3};
                 }}
+            """)
+
+    def _on_speed_toggle(self, checked):
+        self._update_speed_btn_style(checked)
+        self.log_msg(f"速度模式: {'⚡ 极速' if checked else '🤖 普通'}", "INFO")
+
+    def _update_speed_btn_style(self, fast: bool):
+        if fast:
+            self.fast_toggle.setStyleSheet(f"""
+                QPushButton {{ background: {T.ORANGE_BG}; color: {T.ORANGE};
+                    border: 1px solid {T.ORANGE}44; border-radius: {T.R_SM}px;
+                    padding: 5px 14px; font-weight: 700; font-size: 12px; }}
+                QPushButton:hover {{ border: 1px solid {T.ORANGE}88; }}
+            """)
+        else:
+            self.fast_toggle.setStyleSheet(f"""
+                QPushButton {{ background: {T.GREEN_BG}; color: {T.GREEN};
+                    border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
+                    padding: 5px 14px; font-weight: 600; font-size: 12px; }}
+                QPushButton:hover {{ border: 1px solid {T.GREEN}44; }}
             """)
 
     def _toggle_run(self):
@@ -2383,7 +2426,8 @@ class SmartRPAGUI(QMainWindow):
 
         self.worker = TaskWorker(
             path, self.tpl_combo.currentText() or None,
-            not self.popup_cb.isChecked(), self._region
+            not self.popup_cb.isChecked(), self._region,
+            self.fast_toggle.isChecked()
         )
         self.worker.log.connect(self.log_msg)
         self.worker.finished.connect(self._done)

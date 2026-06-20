@@ -81,4 +81,4 @@ class Controller:
 
     def random_delay(self, action_type: str = "click"):
         """随机延迟（模拟真人操作间隔）"""
-        self.human.human_delay(action_type)
+        self.human.human_delay(action_type, getattr(self.human, 'fast_mode', False))

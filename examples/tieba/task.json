@@ -1,5 +1,5 @@
 {
-    "_meta": { "name": "贴吧签到（全吧）" },
+    "_meta": { "name": "贴吧签到（全吧）", "window": "百度贴吧 - *" },
     "_comment": "原理：展开常逛的吧列表 → 循环找灰色星星 → 点进去签到 → 返回刷新 → 继续",
     "_howto": "截图放到 examples/tieba/templates/：",
     "_howto2": "  - view_more.png: 左侧'查看更多'（悬停展开列表）",
@@ -25,9 +25,10 @@
 
     "WaitPage": {
         "desc": "等待首页加载",
-        "action": "wait",
-        "params": { "seconds": 5 },
+        "action": "wait_until",
+        "params": { "template": "switch_old_btn", "threshold": 0.75, "timeout": 30, "interval": 0.5 },
         "next": ["SwitchToOld"],
+        "onErrorNext": ["SwitchToOld"],
         "humanDelay": "read"
     },
 
@@ -41,9 +42,9 @@
     },
 
     "WaitOldLoad": {
-        "desc": "等待旧版加载",
-        "action": "wait",
-        "params": { "seconds": 3 },
+        "desc": "等待旧版加载完成",
+        "action": "wait_until",
+        "params": { "template": "onekey_signin", "threshold": 0.75, "timeout": 20, "interval": 0.5 },
         "next": ["OneKeySignin"],
         "humanDelay": "read"
     },
@@ -58,9 +59,9 @@
     },
 
     "WaitOneKeyDialog": {
-        "desc": "等待签到弹窗",
-        "action": "wait",
-        "params": { "seconds": 2 },
+        "desc": "等待签到弹窗出现",
+        "action": "wait_until",
+        "params": { "template": "start_signin", "threshold": 0.8, "timeout": 10, "interval": 0.3 },
         "next": ["DoOneKeySignin"],
         "humanDelay": "read"
     },
@@ -76,8 +77,8 @@
 
     "WaitOneKeyDone": {
         "desc": "等待一键签到完成",
-        "action": "wait",
-        "params": { "seconds": 3 },
+        "action": "wait_until",
+        "params": { "template": "close_popup", "threshold": 0.75, "timeout": 15, "interval": 0.5 },
         "next": ["CloseResult"],
         "humanDelay": "read"
     },
@@ -90,17 +91,9 @@
             "threshold": 0.75,
             "verify": { "disappear": true, "timeout": 2.0, "retry": 4 }
         },
-        "next": ["WaitClose"],
+        "next": ["HoverViewMore"],
         "retry": { "count": 2, "interval": 1.0 },
         "humanDelay": "transition"
-    },
-
-    "WaitClose": {
-        "desc": "弹窗关闭后等1秒",
-        "action": "wait",
-        "params": { "seconds": 1 },
-        "next": ["HoverViewMore"],
-        "humanDelay": "read"
     },
 
     "HoverViewMore": {
@@ -113,10 +106,11 @@
     },
 
     "WaitListExpanded": {
-        "desc": "等待列表展开",
-        "action": "wait",
-        "params": { "seconds": 2 },
+        "desc": "等待列表展开（灰色星星出现）",
+        "action": "wait_until",
+        "params": { "template": "grey_star", "threshold": 0.75, "timeout": 8, "interval": 0.3 },
         "next": ["FindUnsigned"],
+        "onErrorNext": ["FindUnsigned"],
         "humanDelay": "read"
     },
 
@@ -146,9 +140,9 @@
     },
 
     "WaitTiebaPage": {
-        "desc": "等待贴吧页面加载",
-        "action": "wait",
-        "params": { "seconds": 3 },
+        "desc": "等待贴吧页面加载（签到按钮出现或已签到标志）",
+        "action": "wait_until",
+        "params": { "template": "signin_btn_tieba", "threshold": 0.8, "timeout": 15, "interval": 0.5 },
         "next": ["TrySignin"],
         "humanDelay": "read"
     },
@@ -163,10 +157,11 @@
     },
 
     "WaitSigninDone": {
-        "desc": "等待签到完成",
-        "action": "wait",
-        "params": { "seconds": 3 },
+        "desc": "等待签到完成（对号出现）",
+        "action": "wait_until",
+        "params": { "template": "check_mark", "threshold": 0.8, "timeout": 10, "interval": 0.3 },
         "next": ["BackToHome"],
+        "onErrorNext": ["BackToHome"],
         "humanDelay": "read"
     },
 
@@ -180,9 +175,9 @@
     },
 
     "WaitHomeLoad": {
-        "desc": "等待首页加载",
-        "action": "wait",
-        "params": { "seconds": 4 },
+        "desc": "等待首页加载完成（查看更多出现）",
+        "action": "wait_until",
+        "params": { "template": "view_more", "threshold": 0.75, "timeout": 15, "interval": 0.5 },
         "next": ["HoverViewMore"],
         "humanDelay": "read"
     }

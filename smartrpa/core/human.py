@@ -82,6 +82,11 @@ class HumanLike:
         """
         self.mouse = mouse_controller
         self._last_click_time = 0
+        self.fast_mode: bool = False
+
+    def set_fast_mode(self, enabled: bool):
+        """启用/禁用快速模式（游戏场景）"""
+        self.fast_mode = enabled
 
     # ========== 鼠标操作 ==========
 
@@ -98,6 +103,15 @@ class HumanLike:
         if self.mouse is None:
             import pyautogui
             self.mouse = pyautogui
+
+        # 快速模式：瞬移，不画轨迹
+        if self.fast_mode:
+            try:
+                import ctypes
+                ctypes.windll.user32.SetCursorPos(x, y)
+            except Exception:
+                self.mouse.moveTo(x, y, duration=0)
+            return
 
         if use_bezier:
             # 获取当前鼠标位置
@@ -201,7 +215,7 @@ class HumanLike:
         time.sleep(max(0.05, delay))
 
     @staticmethod
-    def human_delay(action_type: str = "click"):
+    def human_delay(action_type: str = "click", fast_mode: bool = False):
         """
         根据操作类型选择不同的延迟分布
 
@@ -209,7 +223,12 @@ class HumanLike:
         - read: 0.5-2s（阅读/等待）
         - transition: 0.3-0.8s（界面切换）
         - think: 1-3s（决策时间）
+        - fast: 所有类型 ≈ 10ms（游戏模式）
         """
+        if fast_mode:
+            time.sleep(random.uniform(0.005, 0.015))
+            return
+
         delays = {
             "click":      (0.15, 0.08),
             "read":       (1.0, 0.5),

@@ -34,6 +34,7 @@ class TaskEngine:
         self.popup = popup
 
         self._tasks: Dict[str, dict] = {}
+        self._meta: dict = {}
         self._callbacks: Dict[str, Callable] = {}
         self._vars: Dict[str, any] = {}  # Runtime variables
         self._running = False
@@ -43,6 +44,11 @@ class TaskEngine:
         self._anchor_offset: Tuple[int, int] = (0, 0)
         self._anchor_template: Optional[str] = None
         self._anchor_threshold: float = 0.8
+        self._window_title: Optional[str] = None
+
+    def set_window_title(self, title: Optional[str]):
+        """设置窗口标题锚定（支持 * 通配符）"""
+        self._window_title = title
 
     # ========== 配置加载 ==========
 
@@ -61,6 +67,10 @@ class TaskEngine:
         tasks = {k: v for k, v in data.items()
                  if isinstance(v, dict) and not k.startswith('_')}
         self._tasks.update(tasks)
+        # 保存 _meta 元数据
+        meta = data.get("_meta", {})
+        if isinstance(meta, dict):
+            self._meta = meta
         logger.info(f"Loaded {len(tasks)} task definitions")
 
     def on(self, name: str, func: Callable):
@@ -84,12 +94,52 @@ class TaskEngine:
         """
         执行锚定校准，返回当前偏移量 (dx, dy)。
 
-        如果上一次校准的偏移量与当前相差超过阈值，
-        说明窗口移动了，重新计算偏移。
+        支持两种模式：
+          1. 窗口标题锚定（优先）：按窗口标题找位置
+          2. 模板锚定：按模板图片找位置
 
         Returns:
-            (dx, dy) 当前窗口相对于初始位置的偏移
+            (dx, dy) 窗口/模板左上角在全屏中的坐标
         """
+        # 模式1：窗口标题锚定
+        if self._window_title:
+            try:
+                import win32gui
+                pattern = self._window_title.replace("*", "____WILD____")
+                parts = pattern.split("____WILD____")
+
+                def find_win(hwnd, _):
+                    title = win32gui.GetWindowText(hwnd)
+                    if not win32gui.IsWindowVisible(hwnd):
+                        return True
+                    # 支持通配符匹配
+                    if len(parts) == 1:
+                        if title == parts[0]:
+                            found.append(hwnd)
+                            return False
+                    elif len(parts) == 2:
+                        if title.startswith(parts[0]) and title.endswith(parts[1]):
+                            found.append(hwnd)
+                            return False
+                    elif len(parts) >= 3:
+                        if parts[0] in title and parts[1] in title:
+                            found.append(hwnd)
+                            return False
+                    return True
+
+                found = []
+                win32gui.EnumWindows(find_win, None)
+                if found:
+                    rect = win32gui.GetWindowRect(found[0])
+                    logger.info(f"窗口锚定: '{self._window_title}' → ({rect[0]},{rect[1]})")
+                    return (rect[0], rect[1])
+                else:
+                    logger.warning(f"未找到窗口: '{self._window_title}'")
+            except ImportError:
+                logger.warning("win32gui 未安装，无法使用窗口锚定")
+            return (0, 0)
+
+        # 模式2：模板锚定
         if not self._anchor_template:
             return (0, 0)
 
@@ -97,7 +147,6 @@ class TaskEngine:
         result = self.vision.find(screenshot, self._anchor_template,
                                   threshold=self._anchor_threshold)
         if result.found:
-            # 假设锚定模板在参考截图中位于 (0, 0)
             return (result.x, result.y)
 
         logger.warning(f"锚定模板 '{self._anchor_template}' 未找到，偏移不生效")
@@ -132,8 +181,13 @@ class TaskEngine:
         current = entry
         step_count = 0
 
-        # 首次校准锚定
-        if self._anchor_template:
+        # 游戏加速模式（从 _meta 读取）
+        if self._meta.get("speed") == "fast":
+            self.controller.human.fast_mode = True
+            logger.info("加速模式已启用 (瞬移鼠标+零延迟)")
+
+        # 首次校准锚定（窗口标题或模板图片）
+        if self._window_title or self._anchor_template:
             self._anchor_offset = self._calibrate_anchor()
             if self._anchor_offset != (0, 0):
                 logger.info(f"窗口锚定偏移: {self._anchor_offset}")
@@ -154,8 +208,9 @@ class TaskEngine:
             self._stats["steps"] += 1
 
             # 定期重新校准锚定（每 10 步一次）
-            if self._anchor_template and step_count % 10 == 0:
-                self._anchor_offset = self._calibrate_anchor()
+            if self._window_title or self._anchor_template:
+                if step_count % 10 == 0:
+                    self._anchor_offset = self._calibrate_anchor()
 
             # 截图
             screenshot = self.controller.screenshot()
