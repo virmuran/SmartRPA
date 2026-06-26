@@ -74,7 +74,6 @@ from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon,
 from PySide6.QtCore import QUrl
 
 from smartrpa import Controller, Vision, TaskEngine, PopupHandler, __version__
-from callback_fishing import callback_bd2_fishing
 
 
 # ═══════════════════════════════════════════════
@@ -486,7 +485,6 @@ class TaskWorker(QThread):
             engine._user_log = lambda m, l: self.log.emit(m, l)
             if self.fast_mode:
                 engine.controller.human.fast_mode = True
-            engine.on("bd2_fishing", callback_bd2_fishing)
             engine.load(self.task_file)
             entry = list(engine._tasks.keys())[0]
             # 窗口锚定：从 _meta 读取 window 标题
