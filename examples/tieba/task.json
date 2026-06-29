@@ -19,6 +19,14 @@
         "desc": "打开 Edge 浏览器进入贴吧",
         "action": "exec",
         "params": { "cmd": "start msedge https://tieba.baidu.com" },
+        "next": ["MaximizeWindow"],
+        "humanDelay": "transition"
+    },
+
+    "MaximizeWindow": {
+        "desc": "最大化浏览器窗口（确保按钮可见）",
+        "action": "hotkey",
+        "params": { "keys": ["win", "up"] },
         "next": ["WaitPage"],
         "humanDelay": "transition"
     },

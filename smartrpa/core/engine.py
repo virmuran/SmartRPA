@@ -367,6 +367,14 @@ class TaskEngine:
                     return self._verify_click(template, threshold, params["verify"])
                 return True
             else:
+                # 未找到，尝试滚动查找
+                scroll_cfg = params.get("scroll_search")
+                if scroll_cfg:
+                    return self._scroll_and_retry(
+                        screenshot, template, threshold, roi,
+                        scroll_cfg, dx, dy,
+                        params.get("verify")
+                    )
                 logger.warning(f"  └ 未找到: {template} (阈值={threshold})")
                 return False
 
@@ -417,6 +425,30 @@ class TaskEngine:
             return False
 
         return True
+
+    def _scroll_and_retry(self, screenshot, template, threshold, roi, cfg, dx, dy, verify_cfg=None):
+        """滚动页面并重试查找模板"""
+        direction = cfg.get("direction", "down")
+        amount = cfg.get("amount", 300)
+        max_attempts = cfg.get("max_attempts", 3)
+        scroll_delay = cfg.get("delay", 0.5)
+
+        logger.info(f"  └ 未找到 {template}，尝试滚动查找 ({direction} {amount}px × {max_attempts})")
+        for i in range(max_attempts):
+            self.controller.scroll(direction, amount)
+            time.sleep(scroll_delay)
+            screenshot = self.controller.screenshot()
+            result = self.vision.find(screenshot, template, threshold, roi)
+            if result.found:
+                logger.info(f"  └ 滚动{amount}px后找到: {template}")
+                cx, cy = result.center
+                self.controller.click(cx - dx, cy - dy)
+                if verify_cfg:
+                    return self._verify_click(template, threshold, verify_cfg)
+                return True
+            logger.info(f"  └ 滚动{amount}px后仍未找到 (第{i+1}次)")
+        logger.warning(f"  └ 滚动{max_attempts}次后仍未找到: {template}")
+        return False
 
     def _do_press(self, params: dict) -> bool:
         """按键操作"""
@@ -617,9 +649,16 @@ class TaskEngine:
         if not cmd:
             return False
         import subprocess
+        import os
+        cwd = params.get("cwd", ".")
+        wait = params.get("wait", False)
         try:
-            subprocess.Popen(cmd, shell=True)
-            logger.info(f"  └ 已执行: {cmd}")
+            if wait:
+                result = subprocess.run(cmd, shell=True, cwd=cwd)
+                logger.info(f"  └ 已执行: {cmd} (exit={result.returncode})")
+            else:
+                subprocess.Popen(cmd, shell=True, cwd=cwd)
+                logger.info(f"  └ 已执行: {cmd}")
             return True
         except Exception as e:
             logger.error(f"执行命令失败: {e}")

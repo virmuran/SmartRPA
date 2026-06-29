@@ -1,0 +1,14 @@
+tests/
+cleaner/
+__pycache__/
+dist/
+build/
+
+# Linter / type-checker caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/

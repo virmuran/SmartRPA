@@ -67,6 +67,10 @@ class Controller:
         """拖拽"""
         self.human.drag(x1, y1, x2, y2)
 
+    def scroll(self, direction: str = "down", amount: int = 300):
+        """鼠标滚轮滚动"""
+        self.human.scroll(direction, amount)
+
     # ========== 键盘操作 ==========
 
     def press_key(self, key: str):

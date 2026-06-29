@@ -172,7 +172,19 @@ class HumanLike:
             duration = random.uniform(0.3, 0.8)
         pyautogui.drag(x2 - x1, y2 - y1, duration=duration)
 
-    # ========== 键盘操作 ==========
+    def scroll(self, direction: str = "down", amount: int = 300):
+        """鼠标滚轮滚动（down向上滚为正像素，up向上滚为负像素）"""
+        import pyautogui
+        delta = amount if direction == "down" else -amount
+        if self.fast_mode:
+            pyautogui.scroll(delta)
+        else:
+            # 真人滚轮：分几次小步滚动
+            steps = random.randint(2, 4)
+            per_step = delta // steps
+            for _ in range(steps):
+                pyautogui.scroll(per_step + random.randint(-20, 20))
+                time.sleep(random.uniform(0.03, 0.08))    # ========== 键盘操作 ==========
 
     def press_key(self, key: str):
         """按下按键，加随机力度延迟（真人不会精准按0.05秒）"""

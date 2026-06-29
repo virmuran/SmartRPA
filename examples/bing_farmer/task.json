@@ -1,0 +1,16 @@
+{
+    "_meta": { "name": "Bing Rewards 积分" },
+    "_comment": "首次运行自动打开 GUI 设置账号，之后直接无头 CLI",
+
+    "RunFarmer": {
+        "desc": "运行 Bing Rewards 积分任务",
+        "action": "exec",
+        "params": {
+            "cmd": "python run_farmer.py",
+            "cwd": "examples\\bing_farmer",
+            "wait": true
+        },
+        "next": null,
+        "humanDelay": "transition"
+    }
+}
