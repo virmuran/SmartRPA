@@ -2192,10 +2192,10 @@ class SmartRPAGUI(QMainWindow):
             self._ed[:] = ordered
 
         # Use existing editing dir if available, otherwise create new
+        now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]
         if hasattr(self, '_ed_task_dir') and self._ed_task_dir and os.path.isdir(self._ed_task_dir):
             d = self._ed_task_dir
         else:
-            now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]
             d = data_dir(f"tasks/{now}")
         os.makedirs(d, exist_ok=True)
 
@@ -2207,26 +2207,29 @@ class SmartRPAGUI(QMainWindow):
             "modified": datetime.datetime.now().isoformat()
         }
         for i, s in enumerate(self._ed):
-            tpl, x, y, w, h, a = s
-            sid = f"Step{i+1}"
-            e = {"desc": f"步骤{i+1}"}
-            if a == "wait":
-                e["action"] = "wait"
-                e["params"] = {"seconds": float(tpl.replace("秒", ""))}
-            elif a == "press":
-                e["action"] = "press"
-                e["params"] = {"key": tpl}
-            elif a == "wait_until":
-                e["action"] = "wait_until"
-                e["params"] = {"template": tpl, "threshold": 0.8, "timeout": 60}
-            elif a == "click":
-                e["action"] = "click"
-                e["params"] = {"template": tpl, "threshold": 0.8}
-            if i < len(self._ed) - 1:
-                e["next"] = [f"Step{i+2}"]
-            elif loop > 1:
-                e["next"] = ["Step1"]
-            tasks[sid] = e
+            try:
+                tpl, x, y, w, h, a = s
+                sid = f"Step{i+1}"
+                e = {"desc": f"步骤{i+1}"}
+                if a == "wait":
+                    e["action"] = "wait"
+                    e["params"] = {"seconds": float(tpl.replace("秒", ""))}
+                elif a == "press":
+                    e["action"] = "press"
+                    e["params"] = {"key": tpl}
+                elif a == "wait_until":
+                    e["action"] = "wait_until"
+                    e["params"] = {"template": tpl, "threshold": 0.8, "timeout": 60}
+                elif a == "click":
+                    e["action"] = "click"
+                    e["params"] = {"template": tpl, "threshold": 0.8}
+                if i < len(self._ed) - 1:
+                    e["next"] = [f"Step{i+2}"]
+                elif loop > 1:
+                    e["next"] = ["Step1"]
+                tasks[sid] = e
+            except Exception as ex:
+                self.log_msg(f"步骤{i+1}保存失败: {ex}", "WARN")
         if loop > 1 and "Step1" in tasks:
             tasks["Step1"]["maxTimes"] = loop
         with open(os.path.join(d, "task.json"), "w", encoding="utf-8") as f:
