@@ -710,9 +710,13 @@ class TaskEngine:
         keys = params.get("keys", [])
         if not keys:
             return False
-        import pyautogui
         try:
-            pyautogui.hotkey(*keys)
+            # 模拟组合键：全部按下后逆序释放
+            import pydirectinput
+            for k in keys:
+                pydirectinput.keyDown(k)
+            for k in reversed(keys):
+                pydirectinput.keyUp(k)
             logger.info(f"  └ 组合键: {'+'.join(keys)}")
             return True
         except Exception as e:

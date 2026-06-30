@@ -64,7 +64,7 @@ class Controller:
         截取屏幕区域
 
         Args:
-            region: (x, y, w, h)，None=全屏
+            region: (x, y, w, h)，None=全虚拟桌面（所有显示器拼接）
 
         Returns:
             BGR格式numpy数组
@@ -73,7 +73,9 @@ class Controller:
             x, y, w, h = region
             monitor = {"left": x, "top": y, "width": w, "height": h}
         else:
-            monitor = self._sct.monitors[1]
+            # mss monitors[0] = 全虚拟桌面（所有显示器拼接）
+            # 使用 monitors[0] 确保无论用户在哪块屏幕上操作都能截到
+            monitor = self._sct.monitors[0]
 
         img = self._sct.grab(monitor)
         result = np.array(img)
@@ -83,7 +85,7 @@ class Controller:
 
     @property
     def screen_size(self) -> Tuple[int, int]:
-        m = self._sct.monitors[1]
+        m = self._sct.monitors[0]
         return (m["width"], m["height"])
 
     @property
@@ -93,7 +95,7 @@ class Controller:
         单屏时为 (0,0)；双屏副屏在左侧时可能为 (-1920, 0)。
         mss 截图的像素 (px,py) 对应虚拟桌面 (px+left, py+top)。
         """
-        m = self._sct.monitors[1]
+        m = self._sct.monitors[0]
         return (m["left"], m["top"])
 
     # ========== 鼠标操作（委托给HumanLike） ==========
@@ -103,8 +105,8 @@ class Controller:
         if use_human:
             self.human.click(x, y)
         else:
-            import pyautogui
-            pyautogui.click(x, y)
+            import pydirectinput
+            pydirectinput.click(x, y)
 
     def move_to(self, x: int, y: int):
         """移动鼠标"""
