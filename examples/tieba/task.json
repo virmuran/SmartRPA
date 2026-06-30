@@ -1,5 +1,5 @@
 {
-    "_meta": { "name": "贴吧签到（全吧）", "window": "百度贴吧 - *" },
+    "_meta": { "name": "贴吧签到（全吧）", "window": "*百度贴吧*" },
     "_comment": "原理：展开常逛的吧列表 → 循环找灰色星星 → 点进去签到 → 返回刷新 → 继续",
     "_howto": "截图放到 examples/tieba/templates/：",
     "_howto2": "  - view_more.png: 左侧'查看更多'（悬停展开列表）",

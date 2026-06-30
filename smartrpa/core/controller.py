@@ -3,7 +3,25 @@ import time
 import numpy as np
 import mss
 import cv2
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
+from screeninfo import get_monitors
+
+
+class Monitor:
+    """单个显示器信息"""
+    def __init__(self, m):
+        self.x = m.x
+        self.y = m.y
+        self.w = m.width
+        self.h = m.height
+        self.name = m.name or ""
+        self.is_primary = m.is_primary
+
+    def contains(self, px: int, py: int) -> bool:
+        return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h
+
+    def __repr__(self):
+        return f"Monitor({self.name} {'P' if self.is_primary else ''} {self.w}x{self.h} @ ({self.x},{self.y}))"
 
 
 class Controller:
@@ -12,6 +30,25 @@ class Controller:
     def __init__(self):
         self._sct = mss.mss()
         self._human = None  # 延迟初始化
+        self._monitors: List[Monitor] = self._detect_monitors()
+
+    def _detect_monitors(self) -> List[Monitor]:
+        """使用 screeninfo 检测所有显示器布局"""
+        monitors = [Monitor(m) for m in get_monitors()]
+        for mon in monitors:
+            print(f"[Controller] {mon}")
+        return monitors
+
+    @property
+    def monitors(self) -> List[Monitor]:
+        return self._monitors
+
+    @property
+    def primary(self) -> Optional[Monitor]:
+        for m in self._monitors:
+            if m.is_primary:
+                return m
+        return self._monitors[0] if self._monitors else None
 
     @property
     def human(self):
@@ -48,6 +85,16 @@ class Controller:
     def screen_size(self) -> Tuple[int, int]:
         m = self._sct.monitors[1]
         return (m["width"], m["height"])
+
+    @property
+    def capture_origin(self) -> Tuple[int, int]:
+        """截图原点在虚拟桌面中的偏移 (left, top)。
+
+        单屏时为 (0,0)；双屏副屏在左侧时可能为 (-1920, 0)。
+        mss 截图的像素 (px,py) 对应虚拟桌面 (px+left, py+top)。
+        """
+        m = self._sct.monitors[1]
+        return (m["left"], m["top"])
 
     # ========== 鼠标操作（委托给HumanLike） ==========
 

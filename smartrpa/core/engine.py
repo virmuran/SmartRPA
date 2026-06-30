@@ -112,17 +112,36 @@ class TaskEngine:
                     title = win32gui.GetWindowText(hwnd)
                     if not win32gui.IsWindowVisible(hwnd):
                         return True
-                    # 支持通配符匹配
-                    if len(parts) == 1:
+                    parts_clean = [p for p in parts if p]  # 去除空串
+                    num_parts = len(parts)
+                    # *keyword*
+                    if num_parts == 3 and not parts[0] and not parts[-1]:
+                        if parts[1] in title:
+                            found.append(hwnd)
+                            return False
+                    # 精确匹配
+                    elif num_parts == 1:
                         if title == parts[0]:
                             found.append(hwnd)
                             return False
-                    elif len(parts) == 2:
+                    # prefix*
+                    elif num_parts == 2 and not parts[1]:
+                        if title.startswith(parts[0]):
+                            found.append(hwnd)
+                            return False
+                    # *suffix
+                    elif num_parts == 2 and not parts[0]:
+                        if title.endswith(parts[1]):
+                            found.append(hwnd)
+                            return False
+                    # prefix*suffix
+                    elif num_parts == 2:
                         if title.startswith(parts[0]) and title.endswith(parts[1]):
                             found.append(hwnd)
                             return False
-                    elif len(parts) >= 3:
-                        if parts[0] in title and parts[1] in title:
+                    # *part1*part2*
+                    elif num_parts >= 3:
+                        if all(p in title for p in filter(None, parts)):
                             found.append(hwnd)
                             return False
                     return True
@@ -351,8 +370,9 @@ class TaskEngine:
         threshold = params.get("threshold", 0.8)
         roi = params.get("roi")
 
-        # 应用锚定偏移到坐标参数
+        # 应用锚定偏移 + 截图原点偏移到坐标参数
         dx, dy = self._anchor_offset
+        sx, sy = self.controller.capture_origin
 
         if template:
             use_multi_scale = params.get("multi_scale", True)
@@ -361,7 +381,7 @@ class TaskEngine:
                                       use_multi_scale, use_multi_angle)
             if result.found:
                 cx, cy = result.center
-                self.controller.click(cx - dx, cy - dy)
+                self.controller.click(cx + sx - dx, cy + sy - dy)
                 # 点击后验证
                 if params.get("verify"):
                     return self._verify_click(template, threshold, params["verify"])
@@ -378,8 +398,8 @@ class TaskEngine:
                 logger.warning(f"  └ 未找到: {template} (阈值={threshold})")
                 return False
 
-        x = params.get("x", 0) - dx
-        y = params.get("y", 0) - dy
+        x = params.get("x", 0) + sx - dx
+        y = params.get("y", 0) + sy - dy
         self.controller.click(x, y)
         return True
 
@@ -442,7 +462,8 @@ class TaskEngine:
             if result.found:
                 logger.info(f"  └ 滚动{amount}px后找到: {template}")
                 cx, cy = result.center
-                self.controller.click(cx - dx, cy - dy)
+                sx, sy = self.controller.capture_origin
+                self.controller.click(cx + sx - dx, cy + sy - dy)
                 if verify_cfg:
                     return self._verify_click(template, threshold, verify_cfg)
                 return True
@@ -493,10 +514,11 @@ class TaskEngine:
     def _do_swipe(self, params: dict) -> bool:
         """滑动"""
         dx, dy = self._anchor_offset
-        x1 = params.get("from", (0, 0))[0] - dx
-        y1 = params.get("from", (0, 0))[1] - dy
-        x2 = params.get("to", (0, 0))[0] - dx
-        y2 = params.get("to", (0, 0))[1] - dy
+        sx, sy = self.controller.capture_origin
+        x1 = params.get("from", (0, 0))[0] + sx - dx
+        y1 = params.get("from", (0, 0))[1] + sy - dy
+        x2 = params.get("to", (0, 0))[0] + sx - dx
+        y2 = params.get("to", (0, 0))[1] + sy - dy
         self.controller.drag(x1, y1, x2, y2)
         return True
 
@@ -668,6 +690,7 @@ class TaskEngine:
         """移动鼠标到模板位置（悬停触发，不点击）"""
         template = params.get("template")
         threshold = params.get("threshold", 0.8)
+        sx, sy = self.controller.capture_origin
         if template:
             use_multi_scale = params.get("multi_scale", True)
             use_multi_angle = params.get("multi_angle", False)
@@ -675,7 +698,7 @@ class TaskEngine:
             result = self.vision.find(screenshot, template, threshold, roi,
                                       use_multi_scale, use_multi_angle)
             if result.found:
-                self.controller.move_to(result.center[0], result.center[1])
+                self.controller.move_to(result.center[0] + sx, result.center[1] + sy)
                 logger.info(f"  └ 悬停: {template} ({result.center[0]},{result.center[1]})")
                 return True
             logger.warning(f"  └ 未找到悬停目标: {template}")

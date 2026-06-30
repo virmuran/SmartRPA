@@ -5,5 +5,5 @@ from .core.engine import TaskEngine
 from .core.popup import PopupHandler
 from .core.human import HumanLike
 
-__version__ = "0.6.7"
+__version__ = "0.6.8"
 __all__ = ['Controller', 'Vision', 'Found', 'TaskEngine', 'PopupHandler', 'HumanLike']
