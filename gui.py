@@ -1,30 +1,4 @@
-"""SmartRPA GUI — 视觉驱动的智能桌面自动化程序 (2026 Design)"""
-#
-# ═══════════════════════════════════════════════════════════════
-#  字体/字号 快速定位指南
-# ═══════════════════════════════════════════════════════════════
-#  搜索关键词        | 位置                      | 修改什么
-#  ─────────────────┼──────────────────────────┼──────────────────
-#  自定义字体族       | build_base_qss()          | 全局字体 (line ~118)
-#  btn_primary       | btn_primary()              | 主按钮 13px/600w
-#  btn_danger        | btn_danger()               | 危险按钮 13px/600w
-#  btn_ghost         | btn_ghost()                | 幽灵按钮 12px/500w
-#  标签/标题          | status_pill / section_header | 状态标签/分区标题
-#  page_title函数    | page_title()               | 页面内大标题 24px/700w
-#  section_title     | section_title()             | 配置字段标签
-#  section_desc      | section_desc()              | 描述文字
-#  NavButton         | NavButton._update_style()   | 顶部Tab导航 13px
-#  logo字体           | _build() 顶部导航           | Logo 15px/800w
-#  状态文字           | state_lbl                  | ●就绪 / ●运行中
-#  版本号             | _build() 顶部导航            | v0.1.0 11px
-#  运行/停止按钮      | _update_run_btn_style()     | 全宽切换按钮 14px
-#  步骤项             | _steps 字典 setStyleSheet   | 步骤列表 13px
-#  日志区字体         | self.log.setFont()          | 等宽日志字体 10px
-#  编辑器代码字体     | self.ed_list.setFont()      | 步骤编辑列表 10px
-#  关于页大标题       | _about_content()            | 品牌名 48px
-#  关于页副标题       | _about_content()            | 描述 15px
-#  全局 QFont         | 文件末尾 app.setFont()      | 全局后备字体 10px
-# ═══════════════════════════════════════════════════════════════
+"""SmartRPA GUI — 视觉驱动的智能桌面自动化程序"""
 #
 import sys, os, json, datetime, time
 import numpy as np

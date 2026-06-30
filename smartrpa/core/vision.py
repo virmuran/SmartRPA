@@ -168,7 +168,7 @@ class Vision:
                threshold: float = 0.8) -> bool:
         return self.find(image, template_name, threshold).found
 
-    # ========== 颜色识别（原有2048专用） ==========
+    # ========== 颜色区域检测 ==========
 
     def match_color(self, image: np.ndarray,
                     roi: Tuple[int, int, int, int],
@@ -187,7 +187,7 @@ class Vision:
                 best_dist, best_val = dist, val
         return best_val if best_dist < 80 else None
 
-    # ========== 颜色触发检测（OS-Bot-COLOR 思路） ==========
+    # ========== 颜色触发检测 ==========
 
     def find_color_region(self, image: np.ndarray,
                           target_color: Tuple[int, int, int],
@@ -215,7 +215,7 @@ class Vision:
             ys, xs = np.where(mask > 0)
             return Found(found=True, x=off_x + int(xs.mean()) - 20, y=off_y + int(ys.mean()) - 20,
                          w=40, h=40, score=float(pct), label=f"color_{target_color}")
-            return Found(found=False)
+        return Found(found=False)
 
     # ========== OCR 文字识别 ==========
 

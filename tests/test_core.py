@@ -2,8 +2,8 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
-from smartrpa.core.human import HumanLike, generate_bezier_path
-from smartrpa.core.vision import Vision, Found
+from smartrpa.core.human import generate_bezier_path
+from smartrpa.core.vision import Vision
 from smartrpa.core.engine import TaskEngine
 from smartrpa.core.controller import Controller
 from smartrpa.core.popup import PopupHandler
