@@ -1717,7 +1717,7 @@ class SmartRPAGUI(QMainWindow):
 
         # Recording row
         rec_row = QHBoxLayout(); rec_row.setSpacing(T.SP_SM)
-        self.rec_btn = QPushButton("⏺  录制")
+        self.rec_btn = QPushButton("⏺ 录制")
         self.rec_btn.setCursor(Qt.PointingHandCursor)
         self.rec_btn.setMinimumHeight(26)
         self.rec_btn.setMaximumHeight(26)
@@ -1726,7 +1726,8 @@ class SmartRPAGUI(QMainWindow):
             QPushButton {{
                 background: {T.RED_BG}; color: {T.RED};
                 border: 1px solid {T.RED}33; border-radius: {T.R_SM}px;
-                padding: 5px 14px; font-weight: 600; font-size: 12px;
+                padding: 4px 10px; font-weight: 600; font-size: 12px;
+                min-height: 26px; max-height: 26px;
             }}
             QPushButton:hover {{ border: 1px solid {T.RED}66; }}
         """)
