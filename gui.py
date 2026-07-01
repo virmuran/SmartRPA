@@ -412,20 +412,20 @@ def sep():
 def status_pill(text, color=None, bg=None):
     """Status pill label — rounded, colored"""
     if color is None:
-        color = T.GREEN
+        color = T.TEXT2
     if bg is None:
-        bg = T.GREEN_BG
+        bg = T.SURFACE
     l = QLabel(text)
     l.setStyleSheet(f"""
         color: {color};
         font-size: 12px;
         font-weight: 600;
         padding: 5px 14px;
-        min-height: 32px;
-        max-height: 32px;
+        min-height: 26px;
+        max-height: 26px;
         background: {bg};
         border-radius: {T.R_SM}px;
-        border: 1px solid {color}22;
+        border: 1px solid {T.LINE};
     """)
     return l
 
@@ -1418,13 +1418,13 @@ class SmartRPAGUI(QMainWindow):
         self.task_combo = QComboBox()
         self.task_combo.setStyleSheet(f"""
             QComboBox {{
-                background: {T.GREEN_BG};
-                color: {T.GREEN};
-                border: 1px solid {T.GREEN}22;
+                background: {T.CARD};
+                color: {T.TEXT};
+                border: 1px solid {T.LINE};
                 border-radius: {T.R_SM}px;
                 padding: 5px 14px;
-                min-height: 32px;
-                max-height: 32px;
+                min-height: 26px;
+                max-height: 26px;
                 font-weight: 600;
                 font-size: 12px;
             }}
@@ -1433,11 +1433,11 @@ class SmartRPAGUI(QMainWindow):
                 width: 24px;
             }}
             QComboBox::drop-down:on {{
-                background: {T.GREEN_BG};
+                background: {T.SURFACE};
             }}
             QComboBox:hover {{
-                background: {T.GREEN_BG};
-                border: 1px solid {T.GREEN}44;
+                background: {T.SURFACE};
+                border: 1px solid {T.LINE_LIGHT};
             }}
         """)
         self.task_combo.currentIndexChanged.connect(self._on_task_changed)
@@ -1447,12 +1447,17 @@ class SmartRPAGUI(QMainWindow):
         opt_btn.setFixedWidth(64)
         opt_btn.setStyleSheet(f"""
             QPushButton {{
-                background: {T.GREEN_BG}; color: {T.GREEN};
-                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
-                padding: 5px 10px; min-height: 32px; max-height: 32px;
-                font-weight: 600; font-size: 11px;
+                background: {T.SURFACE};
+                color: {T.TEXT2};
+                border: 1px solid {T.LINE};
+                border-radius: {T.R_SM}px;
+                padding: 5px 10px;
+                min-height: 26px;
+                max-height: 26px;
+                font-weight: 600;
+                font-size: 11px;
             }}
-            QPushButton:hover {{ background: {T.GREEN_BG}; border: 1px solid {T.GREEN}44; }}
+            QPushButton:hover {{ background: {T.CARD}; border: 1px solid {T.LINE_LIGHT}; }}
             QPushButton::menu-indicator {{ image: none; width: 0; }}
         """)
         opt_menu = QMenu(opt_btn)
