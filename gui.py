@@ -1488,13 +1488,13 @@ class SmartRPAGUI(QMainWindow):
         self.tpl_combo.setEditable(True)
         self.tpl_combo.setStyleSheet(f"""
             QComboBox {{
-                background: {T.GREEN_BG};
-                color: {T.GREEN};
-                border: 1px solid {T.GREEN}22;
+                background: {T.CARD};
+                color: {T.TEXT};
+                border: 1px solid {T.LINE};
                 border-radius: {T.R_SM}px;
                 padding: 5px 14px;
-                min-height: 32px;
-                max-height: 32px;
+                min-height: 26px;
+                max-height: 26px;
                 font-weight: 600;
                 font-size: 12px;
             }}
@@ -1503,8 +1503,8 @@ class SmartRPAGUI(QMainWindow):
                 width: 24px;
             }}
             QComboBox:hover {{
-                background: {T.GREEN_BG};
-                border: 1px solid {T.GREEN}44;
+                background: {T.SURFACE};
+                border: 1px solid {T.LINE_LIGHT};
             }}
         """)
         tpb.addWidget(self.tpl_combo, 1)
@@ -1534,7 +1534,7 @@ class SmartRPAGUI(QMainWindow):
         self.run_loop.setRange(1, 9999)
         self.run_loop.setValue(1)
         self.run_loop.setFixedWidth(80)
-        self.run_loop.setStyleSheet(f"QSpinBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.GREEN}44;}}")
+        self.run_loop.setStyleSheet(f"QSpinBox{{background:{T.CARD};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_SM}px;padding:5px 14px;min-height:26px;max-height:26px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.LINE_LIGHT};}}")
         lr.addWidget(self.run_loop)
         tl = QLabel("次")
         tl.setStyleSheet(f"font-size:13px;font-weight:500;color:{T.TEXT2};")
@@ -1543,13 +1543,14 @@ class SmartRPAGUI(QMainWindow):
         Cl.addLayout(lr)
 
         # Speed mode toggle
+        Cl.addWidget(section_title("速度"))
         speed_row = QHBoxLayout()
         speed_row.setSpacing(T.SP_SM)
-        speed_row.addWidget(section_title("速度"))
         self.fast_toggle = QPushButton("⚡ 极速")
         self.fast_toggle.setCheckable(True)
         self.fast_toggle.setCursor(Qt.PointingHandCursor)
-        self.fast_toggle.setMinimumHeight(30)
+        self.fast_toggle.setMinimumHeight(26)
+        self.fast_toggle.setMaximumHeight(26)
         self.fast_toggle.toggled.connect(self._on_speed_toggle)
         self._update_speed_btn_style(False)
         speed_row.addWidget(self.fast_toggle)
@@ -1654,19 +1655,21 @@ class SmartRPAGUI(QMainWindow):
 
     def _update_speed_btn_style(self, fast: bool):
         if fast:
-            self.fast_toggle.setStyleSheet(f"""
-                QPushButton {{ background: {T.ORANGE_BG}; color: {T.ORANGE};
-                    border: 1px solid {T.ORANGE}44; border-radius: {T.R_SM}px;
-                    padding: 5px 14px; font-weight: 700; font-size: 12px; }}
-                QPushButton:hover {{ border: 1px solid {T.ORANGE}88; }}
-            """)
+            self.fast_toggle.setStyleSheet(
+                f"QPushButton{{background:{T.SURFACE};color:{T.TEXT};"
+                f"border:1px solid {T.LINE_LIGHT};border-radius:{T.R_SM}px;"
+                f"padding:4px 10px;font-weight:700;font-size:12px;"
+                f"min-height:26px;max-height:26px;}}"
+                f"QPushButton:hover{{border:1px solid {T.TEXT2};}}"
+            )
         else:
-            self.fast_toggle.setStyleSheet(f"""
-                QPushButton {{ background: {T.GREEN_BG}; color: {T.GREEN};
-                    border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
-                    padding: 5px 14px; font-weight: 600; font-size: 12px; }}
-                QPushButton:hover {{ border: 1px solid {T.GREEN}44; }}
-            """)
+            self.fast_toggle.setStyleSheet(
+                f"QPushButton{{background:{T.CARD};color:{T.TEXT2};"
+                f"border:1px solid {T.LINE};border-radius:{T.R_SM}px;"
+                f"padding:4px 10px;font-weight:600;font-size:12px;"
+                f"min-height:26px;max-height:26px;}}"
+                f"QPushButton:hover{{border:1px solid {T.LINE_LIGHT};}}"
+            )
 
     def _toggle_run(self):
         """Toggle between start and stop."""
