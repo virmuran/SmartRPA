@@ -1848,9 +1848,9 @@ class SmartRPAGUI(QMainWindow):
         self.sched_combo.addItems(["每天", "每小时"])
         self.sched_combo.setStyleSheet(f"""
             QComboBox {{
-                background: {T.GREEN_BG}; color: {T.GREEN};
-                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
-                padding: 3px 10px; min-height: 28px; max-height: 28px;
+                background: {T.CARD}; color: {T.TEXT};
+                border: 1px solid {T.LINE}; border-radius: {T.R_SM}px;
+                padding: 3px 10px; min-height: 26px; max-height: 26px;
                 font-weight: 600; font-size: 11px;
             }}
             QComboBox::drop-down {{ border: none; width: 20px; }}
@@ -1861,9 +1861,9 @@ class SmartRPAGUI(QMainWindow):
         self.sched_time.setTime(self.sched_time.time().fromString("09:00", "HH:mm"))
         self.sched_time.setStyleSheet(f"""
             QDateTimeEdit {{
-                background: {T.GREEN_BG}; color: {T.GREEN};
-                border: 1px solid {T.GREEN}22; border-radius: {T.R_SM}px;
-                padding: 3px 10px; min-height: 28px; max-height: 28px;
+                background: {T.CARD}; color: {T.TEXT};
+                border: 1px solid {T.LINE}; border-radius: {T.R_SM}px;
+                padding: 3px 10px; min-height: 26px; max-height: 26px;
                 font-weight: 600; font-size: 11px;
             }}
         """)
@@ -1926,18 +1926,9 @@ class SmartRPAGUI(QMainWindow):
         ver_ly.addWidget(section_header(f"版本 {__version__}"))
         ver_row = QHBoxLayout()
         ver_row.setSpacing(T.SP_SM)
-        update_btn = QPushButton("检查更新")
+        update_btn = btn_ghost("检查更新")
         update_btn.setCursor(Qt.PointingHandCursor)
-        update_btn.setMinimumHeight(32)
         update_btn.clicked.connect(lambda: self._check_version(force_notify=True))
-        update_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {T.ACCENT_DIM}; color: {T.TEXT};
-                border: 1px solid {T.ACCENT}33; border-radius: {T.R_SM}px;
-                padding: 5px 14px; font-weight: 600; font-size: 12px;
-            }}
-            QPushButton:hover {{ border: 1px solid {T.ACCENT}66; }}
-        """)
         ver_row.addWidget(update_btn)
         self._update_status = QLabel("")
         self._update_status.setStyleSheet(f"font-size:12px; color:{T.TEXT3};")
@@ -2631,11 +2622,14 @@ class SmartRPAGUI(QMainWindow):
 
     @Slot()
     def _on_global_hotkey(self):
-        """Global hotkey pressed: show window or start task."""
+        """Global hotkey pressed: show window, stop or start task."""
         if self.isHidden() or self.isMinimized():
             self.showNormal()
             self.activateWindow()
-        elif not self._running:
+        elif self._running:
+            self.log_msg("全局快捷键: 停止", "INFO")
+            self._stop()
+        else:
             self.log_msg("全局快捷键: 开始运行", "INFO")
             self._start()
 
