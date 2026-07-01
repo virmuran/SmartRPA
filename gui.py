@@ -1147,26 +1147,20 @@ class SmartRPAGUI(QMainWindow):
             if hasattr(self, 'task_combo'):
                 combo.setStyleSheet(f"""
                     QComboBox {{
-                        background: {T.GREEN_BG};
-                        color: {T.GREEN};
-                        border: 1px solid {T.GREEN}22;
+                        background: {T.CARD};
+                        color: {T.TEXT};
+                        border: 1px solid {T.LINE};
                         border-radius: {T.R_SM}px;
                         padding: 5px 14px;
-                        min-height: 32px;
-                        max-height: 32px;
+                        min-height: 26px;
+                        max-height: 26px;
                         font-weight: 600;
                         font-size: 12px;
                     }}
-                    QComboBox::drop-down {{
-                        border: none;
-                        width: 24px;
-                    }}
-                    QComboBox::drop-down:on {{
-                        background: {T.GREEN_BG};
-                    }}
+                    QComboBox::drop-down {{ border: none; width: 24px; }}
                     QComboBox:hover {{
-                        background: {T.GREEN_BG};
-                        border: 1px solid {T.GREEN}44;
+                        background: {T.SURFACE};
+                        border: 1px solid {T.LINE_LIGHT};
                     }}
                 """)
 
@@ -1204,7 +1198,7 @@ class SmartRPAGUI(QMainWindow):
 
         # Editor name combo
         if hasattr(self, 'ed_name'):
-            self.ed_name.setStyleSheet(f"""QComboBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QComboBox::drop-down{{border:none;width:24px;}}QComboBox:hover{{background:{T.GREEN_BG};border:1px solid {T.GREEN}44;}}""")
+            self.ed_name.setStyleSheet(f"""QComboBox{{background:{T.CARD};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_SM}px;padding:5px 14px;min-height:26px;max-height:26px;font-weight:600;font-size:12px;}}QComboBox::drop-down{{border:none;width:24px;}}QComboBox:hover{{background:{T.SURFACE};border:1px solid {T.LINE_LIGHT};}}""")
 
         # Editor steps list
         if hasattr(self, 'ed_list'):
@@ -1212,7 +1206,7 @@ class SmartRPAGUI(QMainWindow):
 
         # Editor loop spinbox
         if hasattr(self, 'run_loop'):
-            self.run_loop.setStyleSheet(f"QSpinBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.GREEN}44;}}")
+            self.run_loop.setStyleSheet(f"QSpinBox{{background:{T.CARD};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_SM}px;padding:5px 14px;min-height:26px;max-height:26px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.LINE_LIGHT};}}")
 
         # Preview label
         if hasattr(self, '_ed_preview'):
@@ -1373,7 +1367,7 @@ class SmartRPAGUI(QMainWindow):
     @Slot()
     def _on_no_update(self):
         self._update_status.setText("已是最新版 ✓")
-        self._update_status.setStyleSheet(f"font-size:12px; color:{T.GREEN};")
+        self._update_status.setStyleSheet(f"font-size:12px; color:{T.TEXT2};")
         self.log_msg(f"当前已是 v{__version__} 最新版", "SUCCESS")
 
     @Slot()
@@ -1562,7 +1556,8 @@ class SmartRPAGUI(QMainWindow):
         # Run / Stop toggle at bottom of config panel
         self.run_btn = QPushButton("\u25B6  开始运行")
         self.run_btn.setCursor(Qt.PointingHandCursor)
-        self.run_btn.setMinimumHeight(40)
+        self.run_btn.setMinimumHeight(26)
+        self.run_btn.setMaximumHeight(26)
         self.run_btn.clicked.connect(self._toggle_run)
         Cl.addWidget(self.run_btn)
         self._update_run_btn_style()
@@ -1604,6 +1599,14 @@ class SmartRPAGUI(QMainWindow):
         self.log.setFont(QFont("Cascadia Code,Consolas,monospace", 10))  # ← 自定义日志等宽字体
         self.log.document().setMaximumBlockCount(2000)
         Rl.addWidget(self.log, 1)
+        # Clear log button
+        clr_log_row = QHBoxLayout()
+        clr_log_row.setSpacing(T.SP_SM)
+        clr_log_btn = btn_ghost("清空日志")
+        clr_log_btn.clicked.connect(self._clear_log)
+        clr_log_row.addWidget(clr_log_btn)
+        clr_log_row.addStretch()
+        Rl.addLayout(clr_log_row)
         split.addWidget(self._log_card)
 
         split.setSizes([300, 540])
@@ -1769,7 +1772,6 @@ class SmartRPAGUI(QMainWindow):
 
         mid_ly.addStretch(1)
         save = btn_primary("保存任务")
-        save.setMinimumHeight(40)
         save.clicked.connect(self._ed_save)
         mid_ly.addWidget(save)
         split.addWidget(mid_panel)
@@ -1788,6 +1790,7 @@ class SmartRPAGUI(QMainWindow):
         self.ed_list.setFont(QFont("Microsoft YaHei", 10))
         self.ed_list.setStyleSheet(f"""QListWidget{{background:{T.SURFACE};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_MD}px;padding:8px;font-size:12px;outline:none;}}QListWidget::item{{padding:6px 10px;border-radius:4px;}}QListWidget::item:selected{{background:{T.ACCENT_DIM};color:{T.TEXT};}}QListWidget::item:hover{{background:{T.CARD_HOVER};}}""")
         self.ed_list.currentRowChanged.connect(self._on_ed_step_selected)
+        self.ed_list.itemDoubleClicked.connect(self._ed_edit_step)
         right_ly.addWidget(self.ed_list, 1)
 
         split.addWidget(right_panel)
@@ -2534,6 +2537,12 @@ class SmartRPAGUI(QMainWindow):
         text = re.sub(r'\n\s*\n', '\n', text).strip()
         QApplication.clipboard().setText(text)
         self.log_msg("日志已复制到剪贴板", "SUCCESS")
+
+
+    def _clear_log(self):
+        """Clear all log content."""
+        self.log.clear()
+        self.log_msg("日志已清空", "INFO")
 
     def log_msg(self, msg, level="INFO"):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
