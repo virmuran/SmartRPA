@@ -1693,27 +1693,42 @@ class SmartRPAGUI(QMainWindow):
         split.setHandleWidth(1)
         split.setStyleSheet(f"QSplitter::handle{{background:{T.LINE};}}")
 
-        # ═══ LEFT: sidebar ═══
+        # ═══ LEFT: task list ═══
         left_panel = QWidget()
         left_panel.setStyleSheet(f"background:{T.CARD}; border:none; border-radius:{T.R_LG}px;")
         left_ly = QVBoxLayout(left_panel)
         left_ly.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
         left_ly.setSpacing(T.SP_MD)
 
-        left_ly.addWidget(section_title("任务名称"))
+        left_ly.addWidget(section_title("任务列表"))
+        self.ed_task_list = QListWidget()
+        self.ed_task_list.setFont(QFont("Microsoft YaHei", 10))
+        self.ed_task_list.setStyleSheet(f"""QListWidget{{background:{T.SURFACE};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_MD}px;padding:8px;font-size:12px;outline:none;}}QListWidget::item{{padding:6px 10px;border-radius:4px;}}QListWidget::item:selected{{background:{T.ACCENT_DIM};color:{T.TEXT};}}QListWidget::item:hover{{background:{T.CARD_HOVER};}}""")
+        self.ed_task_list.currentRowChanged.connect(self._ed_task_selected)
+        left_ly.addWidget(self.ed_task_list, 1)
+        split.addWidget(left_panel)
+
+        # ═══ MID: operations ═══
+        mid_panel = QWidget()
+        mid_panel.setStyleSheet(f"background:{T.CARD}; border:none; border-radius:{T.R_LG}px;")
+        mid_ly = QVBoxLayout(mid_panel)
+        mid_ly.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
+        mid_ly.setSpacing(T.SP_MD)
+
+        mid_ly.addWidget(section_title("任务名称"))
         self.ed_name = QComboBox()
         self.ed_name.setEditable(True)
         self.ed_name.setStyleSheet(f"""QComboBox{{background:{T.CARD};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_SM}px;padding:5px 14px;min-height:26px;max-height:26px;font-weight:600;font-size:12px;}}QComboBox::drop-down{{border:none;width:24px;}}QComboBox:hover{{background:{T.SURFACE};border:1px solid {T.LINE_LIGHT};}}""")
-        left_ly.addWidget(self.ed_name)
+        mid_ly.addWidget(self.ed_name)
 
-        left_ly.addWidget(section_title("操作"))
+        mid_ly.addWidget(section_title("操作"))
         op_row = QHBoxLayout(); op_row.setSpacing(T.SP_SM)
         for label, act in [("+ 点击","click"), ("+ 按键","press"), ("+ 等待","wait"), ("+ 等到","wait_until")]:
             b = btn_ghost(label); b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda checked, a=act: self._ed_add(a))
             op_row.addWidget(b)
         op_row.addStretch()
-        left_ly.addLayout(op_row)
+        mid_ly.addLayout(op_row)
 
         # Recording row
         rec_row = QHBoxLayout(); rec_row.setSpacing(T.SP_SM)
@@ -1733,14 +1748,14 @@ class SmartRPAGUI(QMainWindow):
         """)
         rec_row.addWidget(self.rec_btn)
         rec_row.addStretch()
-        left_ly.addLayout(rec_row)
+        mid_ly.addLayout(rec_row)
 
-        left_ly.addWidget(section_title("预览"))
+        mid_ly.addWidget(section_title("预览"))
         self._ed_preview = QLabel("选择步骤查看预览")
         self._ed_preview.setMinimumHeight(160)
         self._ed_preview.setAlignment(Qt.AlignCenter)
         self._ed_preview.setStyleSheet(f"background:{T.SURFACE};color:{T.TEXT3};border:1px solid {T.LINE};border-radius:{T.R_SM}px;font-size:11px;")
-        left_ly.addWidget(self._ed_preview)
+        mid_ly.addWidget(self._ed_preview)
 
         del_row = QHBoxLayout(); del_row.setSpacing(T.SP_SM)
         del_btn = btn_ghost("删除"); del_btn.setToolTip("删除选中步骤")
@@ -1750,15 +1765,14 @@ class SmartRPAGUI(QMainWindow):
         copy_btn = btn_ghost("复制"); copy_btn.setToolTip("复制选中步骤")
         copy_btn.clicked.connect(self._ed_copy_step); del_row.addWidget(copy_btn)
         clr_btn = btn_ghost("清空"); clr_btn.clicked.connect(self._ed_clr); del_row.addWidget(clr_btn)
-        del_row.addStretch(); left_ly.addLayout(del_row)
+        del_row.addStretch(); mid_ly.addLayout(del_row)
 
-        left_ly.addStretch(1)
+        mid_ly.addStretch(1)
         save = btn_primary("保存任务")
         save.setMinimumHeight(40)
         save.clicked.connect(self._ed_save)
-        left_ly.addWidget(save)
-
-        split.addWidget(left_panel)
+        mid_ly.addWidget(save)
+        split.addWidget(mid_panel)
 
         # ═══ RIGHT: steps list ═══
         right_panel = QWidget()
@@ -1777,7 +1791,7 @@ class SmartRPAGUI(QMainWindow):
         right_ly.addWidget(self.ed_list, 1)
 
         split.addWidget(right_panel)
-        split.setSizes([280, 520])
+        split.setSizes([180, 260, 460])
         ly.addWidget(split, 1)
         return w
 
@@ -2196,6 +2210,81 @@ class SmartRPAGUI(QMainWindow):
         self._ed_task_dir = None  # reset for next editing session
         self._scan()
 
+    def _ed_task_selected(self, idx):
+        """左列任务列表选中时自动加载到编辑器"""
+        if idx < 0:
+            return
+        item = self.ed_task_list.item(idx)
+        if not item:
+            return
+        task_name = item.text()
+        path = self._task_map.get(task_name)
+        if not path:
+            return
+        self._ed_load_path(path)
+
+    def _ed_load_path(self, path):
+        """从指定路径加载任务到编辑器"""
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            self.log_msg(f"读取任务失败: {e}", "ERROR")
+            return
+        self._ed_clr()
+        meta = data.get("_meta", {})
+        display_name = meta.get("name", os.path.basename(os.path.dirname(path)))
+        idx = self.ed_name.findText(display_name)
+        if idx >= 0:
+            self.ed_name.setCurrentIndex(idx)
+        self._ed_task_dir = os.path.dirname(path)
+        steps = {}
+        for k, v in data.items():
+            if k.startswith("_") or not isinstance(v, dict) or "action" not in v:
+                continue
+            steps[k] = v
+        if not steps:
+            self.log_msg("任务中没有有效步骤", "WARN")
+            return
+        referenced = set()
+        for k, v in steps.items():
+            for n in (v.get("next") or []):
+                referenced.add(n)
+            for n in (v.get("onErrorNext") or []):
+                referenced.add(n)
+        entry = None
+        for k in steps:
+            if k not in referenced:
+                entry = k
+                break
+        if entry is None:
+            entry = list(steps.keys())[0]
+        ordered = []
+        visited = set()
+        current_key = entry
+        while current_key and current_key in steps and current_key not in visited:
+            visited.add(current_key)
+            node = steps[current_key]
+            action = node.get("action", "click")
+            params = node.get("params", {})
+            tpl = params.get("template", params.get("key", params.get("seconds", "")))
+            if action == "click":
+                self._ed.append((tpl, 0, 0, 0, 0, "click"))
+            elif action == "press":
+                self._ed.append((params.get("key", ""), 0, 0, 0, 0, "press"))
+            elif action == "wait":
+                self._ed.append((f"{params.get('seconds', 1)}秒", 0, 0, 0, 0, "wait"))
+            elif action == "wait_until":
+                self._ed.append((tpl, 0, 0, 0, 0, "wait_until"))
+            else:
+                self._ed.append((tpl or action, 0, 0, 0, 0, action))
+            ordered.append(node.get("desc", current_key))
+            next_nodes = node.get("next") or []
+            current_key = next_nodes[0] if next_nodes and next_nodes[0] in steps else None
+        for desc in ordered:
+            self.ed_list.addItem(desc)
+        self.log_msg(f"已加载 {len(self._ed)} 个步骤", "SUCCESS")
+
     def _ed_rename(self):
         """Rename a user task by updating _meta.name in its task.json."""
         current = self.task_combo.currentText()
@@ -2334,6 +2423,12 @@ class SmartRPAGUI(QMainWindow):
         # Auto-select first item
         if self.task_combo.count() > 0:
             self.task_combo.setCurrentIndex(0)
+
+        # Refresh editor task list
+        if hasattr(self, 'ed_task_list'):
+            self.ed_task_list.clear()
+            for name in self._task_map:
+                self.ed_task_list.addItem(name)
 
     def _on_task_changed(self):
         path = self._task_map.get(self.task_combo.currentText())
