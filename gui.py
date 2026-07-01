@@ -2392,6 +2392,14 @@ class SmartRPAGUI(QMainWindow):
         if self.task_combo.count() > 0:
             self.task_combo.setCurrentIndex(0)
 
+        # Refresh tasks page list
+        if hasattr(self, 'task_list'):
+            self.task_list.clear()
+            for name in self._task_map:
+                self.task_list.addItem(name)
+            if self.task_list.count() > 0:
+                self.task_list.setCurrentRow(0)
+
         # Refresh editor task list
         if hasattr(self, 'ed_task_list'):
             self.ed_task_list.clear()
