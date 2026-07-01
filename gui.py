@@ -2608,6 +2608,9 @@ class SmartRPAGUI(QMainWindow):
             QMetaObject.invokeMethod(self, "_on_global_hotkey", Qt.ConnectionType.QueuedConnection)
 
         hotkey_str = self._settings.value("global_hotkey", "<ctrl>+<shift>+r")
+        # Auto-fix bare F-keys from older settings (F10 -> <f10>)
+        import re
+        hotkey_str = re.sub(r'\b([Ff]\d+)\b', r'<\1>', hotkey_str)
         try:
             self._ghk_listener = kb.GlobalHotKeys({hotkey_str: on_activate})
             self._ghk_listener.daemon = True
@@ -2651,7 +2654,7 @@ class SmartRPAGUI(QMainWindow):
 
         if result[0]:
             key_str = result[0]
-            # Map pynput key names to GlobalHotKeys format
+            # Map pynput key names to keyboard module format
             key_map = {
                 "Key.ctrl_l": "<ctrl>", "Key.ctrl_r": "<ctrl>",
                 "Key.shift_l": "<shift>", "Key.shift_r": "<shift>",
@@ -2662,7 +2665,13 @@ class SmartRPAGUI(QMainWindow):
             mapped = []
             for p in parts:
                 p = p.strip()
-                mapped.append(key_map.get(p, p.replace("Key.", "").lower()))
+                if p in key_map:
+                    mapped.append(key_map[p])
+                elif p.startswith("Key."):
+                    kn = p.replace("Key.", "")  # f10, up, space etc
+                    mapped.append(f"<{kn.lower()}>")  # pynput needs <f10> format
+                else:
+                    mapped.append(p.lower())  # single letter keys
             hotkey_str = "+".join(mapped)
             self._settings.setValue("global_hotkey", hotkey_str)
             self.ghk_label.setText(f"运行任务: {hotkey_str.replace('<','').replace('>','').upper()}")
