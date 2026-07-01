@@ -250,6 +250,11 @@ class TaskEngine:
             if result:
                 next_tasks = task.get("next", [])
             else:
+                stop_on_error = task.get("stopOnError", False)
+                if stop_on_error:
+                    logger.error(f"  └ 步骤失败且 stopOnError=true，任务终止")
+                    self._stats["errors"] += 1
+                    break
                 next_tasks = task.get("onErrorNext", task.get("next", []))
                 self._stats["errors"] += 1
                 logger.warning(f"  └ 失败，尝试: {next_tasks}")

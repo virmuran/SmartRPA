@@ -59,19 +59,19 @@ class Theme:
 
     # Shared (invariant across themes)
     SP_XS   = 4
-    SP_SM   = 8
-    SP_MD   = 12
-    SP_LG   = 16
-    SP_XL   = 24
-    SP_2XL  = 32
-    SP_3XL  = 48
-    R_SM    = 8
-    R_MD    = 12
-    R_LG    = 16
+    SP_SM   = 6
+    SP_MD   = 10
+    SP_LG   = 14
+    SP_XL   = 20
+    SP_2XL  = 28
+    SP_3XL  = 40
+    R_SM    = 2
+    R_MD    = 3
+    R_LG    = 4
     R_XL    = 20
     ACCENT     = "#7c6ff7"
     ACCENT2    = "#a78bfa"
-    GREEN      = "#34d399"
+    GREEN      = "#5a5a6a"
     ORANGE     = "#fbbf24"
     RED        = "#f87171"
     BLUE       = "#60a5fa"
@@ -97,7 +97,7 @@ class Theme:
     @property
     def ACCENT_DIM(self):  return "#eae6ff" if self.mode == "light" else "#2e2656"
     @property
-    def GREEN_BG(self):    return "#ecfdf5" if self.mode == "light" else "#0d2d22"
+    def GREEN_BG(self):    return "#f5f5f5" if self.mode == "light" else "#1a1a24"
     @property
     def ORANGE_BG(self):   return "#fffbeb" if self.mode == "light" else "#2d2510"
     @property
@@ -287,26 +287,25 @@ QStatusBar::item {{
 # ═══════════════════════════════════════════════
 
 def btn_primary(text):
-    """Primary action button — gradient accent style"""  # ← 自定义主按钮字体 (13px/600w)
+    """Primary action button — flat solid accent color."""
     b = QPushButton(text)
     b.setStyleSheet(f"""
         QPushButton {{
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 {T.ACCENT}, stop:1 #60a5fa);
+            background: {T.ACCENT};
             color: white;
             border: none;
             border-radius: {T.R_SM}px;
             font-weight: 600;
-            padding: 7px 20px;
-            font-size: 13px;
+            padding: 5px 14px;
+            font-size: 12px;
+            min-height: 26px;
+            max-height: 26px;
         }}
         QPushButton:hover {{
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 {T.ACCENT2}, stop:1 #93c5fd);
+            background: {T.ACCENT2};
         }}
         QPushButton:pressed {{
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #6c5ce7, stop:1 #4b8bdb);
+            background: #5a4fd1;
         }}
         QPushButton:disabled {{
             background: {T.LINE};
@@ -317,7 +316,7 @@ def btn_primary(text):
 
 
 def btn_danger(text):
-    """Danger button — same size as primary"""  # ← 自定义停止按钮字体 (13px/600w)
+    """Danger button — same size as primary"""
     b = QPushButton(text)
     b.setStyleSheet(f"""
         QPushButton {{
@@ -326,8 +325,10 @@ def btn_danger(text):
             border: 1px solid {T.DANGER_BORDER};
             border-radius: {T.R_SM}px;
             font-weight: 600;
-            padding: 7px 20px;
-            font-size: 13px;
+            padding: 5px 14px;
+            font-size: 12px;
+            min-height: 26px;
+            max-height: 26px;
         }}
         QPushButton:hover {{
             background: {T.DANGER_HOVER_BG};
@@ -351,9 +352,9 @@ def btn_ghost(text, icon=""):
             color: {T.TEXT2};
             border: 1px solid {T.LINE};
             border-radius: {T.R_SM}px;
-            padding: 5px 14px;
-            min-height: 32px;
-            max-height: 32px;
+            padding: 4px 10px;
+            min-height: 26px;
+            max-height: 26px;
             font-weight: 500;
             font-size: 12px;
         }}
@@ -553,12 +554,31 @@ class RegionSelector(QDialog):
 #  Tab Navigation Button
 # ═══════════════════════════════════════════════
 
-class NavButton(QPushButton):
-    """Navigation button — ChemCal-style tab appearance"""
-    def __init__(self, label, parent=None):
-        super().__init__(label, parent)
+class SidebarButton(QWidget):
+    """Left sidebar navigation — icon + text aligned horizontally"""
+    clicked = Signal()
+
+    def __init__(self, icon, label, parent=None):
+        super().__init__(parent)
         self._active = False
         self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(34)
+        ly = QHBoxLayout(self)
+        ly.setContentsMargins(12, 0, 8, 0)
+        ly.setSpacing(6)
+        ly.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        self._icon = QLabel(icon)
+        self._icon.setStyleSheet("font-size:14px;background:transparent;border:none;")
+        self._icon.setFixedWidth(18)
+        self._icon.setAlignment(Qt.AlignCenter)
+        ly.addWidget(self._icon)
+
+        self._text = QLabel(label)
+        self._text.setStyleSheet("font-size:12px;background:transparent;border:none;")
+        ly.addWidget(self._text)
+        ly.addStretch(1)
+
         self._update_style()
 
     def set_active(self, active):
@@ -568,38 +588,20 @@ class NavButton(QPushButton):
     def _update_style(self):
         if self._active:
             self.setStyleSheet(f"""
-                QPushButton {{
-                    background: {T.CARD};
-                    color: {T.TEXT};
-                    border: 1px solid {T.LINE};
-                    border-bottom: none;
-                    border-top-left-radius: 8px;
-                    border-top-right-radius: 8px;
-                    padding: 0 20px;
-                    margin-right: 2px;
-                    font-weight: 600;  /* ← 自定义导航标签字号 (选中的 Tab) */
-                    font-size: 13px;  /* ← 自定义导航标签字号 */
-                }}
+                SidebarButton {{background:{T.ACCENT_DIM};border:none;border-left:3px solid {T.ACCENT};border-radius:0 4px 4px 0;}}
+                QLabel {{color:{T.TEXT};font-weight:600;}}
             """)
         else:
             self.setStyleSheet(f"""
-                QPushButton {{
-                    background: {T.SURFACE};
-                    color: {T.TEXT2};
-                    border: 1px solid {T.LINE};
-                    border-bottom: 1px solid {T.LINE};
-                    border-top-left-radius: 8px;
-                    border-top-right-radius: 8px;
-                    padding: 0 20px;
-                    margin-right: 2px;
-                    font-weight: 500;  /* ← 自定义导航标签字号 (未选中的 Tab) */
-                    font-size: 13px;  /* ← 自定义导航标签字号 */
-                }}
-                QPushButton:hover {{
-                    background: {T.CARD_HOVER};
-                    color: {T.TEXT};
-                }}
+                SidebarButton {{background:transparent;border:none;border-left:3px solid transparent;border-radius:0 4px 4px 0;}}
+                QLabel {{color:{T.TEXT2};font-weight:500;}}
+                SidebarButton:hover {{background:{T.CARD_HOVER};}}
+                SidebarButton:hover QLabel {{color:{T.TEXT};}}
             """)
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 # ═══════════════════════════════════════════════
@@ -939,80 +941,62 @@ class SmartRPAGUI(QMainWindow):
     def _build(self):
         cw = QWidget()
         self.setCentralWidget(cw)
-        root = QVBoxLayout(cw)
+        root = QHBoxLayout(cw)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ═══ TOP: Navigation Bar ═══
-        top_nav = QWidget()
-        top_nav.setFixedHeight(44)
-        top_nav.setStyleSheet(f"background: {T.SURFACE};")
-        tn_ly = QHBoxLayout(top_nav)
-        tn_ly.setContentsMargins(T.SP_LG, 0, T.SP_LG, 0)
-        tn_ly.setSpacing(0)
+        # ═══ LEFT: Sidebar ═══
+        sidebar = QWidget()
+        sidebar.setFixedWidth(180)
+        sidebar.setStyleSheet(f"background: {T.BG};")
+        sb_ly = QVBoxLayout(sidebar)
+        sb_ly.setContentsMargins(0, 0, 0, 0)
+        sb_ly.setSpacing(0)
 
-        # Logo
+        logo_w = QWidget()
+        logo_w.setStyleSheet("background: transparent;")
+        logo_ly = QHBoxLayout(logo_w)
+        logo_ly.setContentsMargins(16, 16, 16, 12)
         self._logo_label = QLabel("SmartRPA")
-        self._logo_label.setStyleSheet(f"""
-            font-size: 15px;  /* ← 自定义 Logo 字号 */
-            font-weight: 800;  /* ← 自定义 Logo 字重 */
-            color: {T.TEXT};
-            letter-spacing: -0.3px;
-            padding: 0 12px 0 4px;
-        """)
-        tn_ly.addWidget(self._logo_label)
+        self._logo_label.setStyleSheet(f"font-size:16px;font-weight:700;color:{T.TEXT};letter-spacing:-0.3px;")
+        logo_ly.addWidget(self._logo_label)
+        logo_ly.addStretch()
+        sb_ly.addWidget(logo_w)
 
-        # Nav buttons
+        sep = QWidget()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background: {T.LINE};")
+        sb_ly.addWidget(sep)
+        sb_ly.addSpacing(8)
+
         self.nav_btns = []
-        nav_items = [
-            "自动化任务",
-            "任务编辑器",
-            "设置",
-            "关于",
-        ]
-        for label in nav_items:
-            btn = NavButton(label)
-            btn.clicked.connect(lambda checked, idx=len(self.nav_btns): self._switch_page(idx))
-            btn.setFixedHeight(44)
-            tn_ly.addWidget(btn)
+        nav_items = [("📋","自动化任务"),("✏️","任务编辑器"),("⚙","设置"),("ℹ","关于")]
+        for icon, label in nav_items:
+            btn = SidebarButton(icon, label)
+            btn.clicked.connect(lambda idx=len(self.nav_btns): self._switch_page(idx))
+            sb_ly.addWidget(btn)
             self.nav_btns.append(btn)
         self.nav_btns[0].set_active(True)
+        sb_ly.addStretch(1)
 
-        tn_ly.addStretch(1)
-
-        # Right-side items with spacing
-        right_container = QWidget()
-        right_container.setStyleSheet("background: transparent;")
-        rc_ly = QHBoxLayout(right_container)
-        rc_ly.setContentsMargins(0, 0, 0, 0)
-        rc_ly.setSpacing(6)
-
-        # Status indicator
-        self.pulse_dot = PulseDot()
-        rc_ly.addWidget(self.pulse_dot)
-
+        bottom_w = QWidget()
+        bottom_w.setStyleSheet("background: transparent;")
+        bot_ly = QVBoxLayout(bottom_w)
+        bot_ly.setContentsMargins(12, 8, 12, 12)
+        bot_ly.setSpacing(6)
         self.state_lbl = QLabel("就绪")
-        self.state_lbl.setStyleSheet(f"color:{T.TEXT2}; font-size:12px; font-weight:500; padding: 0 8px 0 4px;")  # ← 自定义状态文字字号（就绪）
-        rc_ly.addWidget(self.state_lbl)
-
-        # Theme toggle
+        self.state_lbl.setStyleSheet(f"color:{T.TEXT3};font-size:11px;padding:0 4px;")
+        bot_ly.addWidget(self.state_lbl)
         self.theme_switch = ThemeSwitch(T.mode)
         self.theme_switch.toggled.connect(self._on_theme_toggle)
-        rc_ly.addWidget(self.theme_switch)
-
-        # Version
+        bot_ly.addWidget(self.theme_switch)
         self._ver_label = QLabel(f"v{__version__}")
-        self._ver_label.setStyleSheet(f"""
-            font-size: 11px;
-            color: {T.TEXT3};
-            padding: 0 4px 0 8px;
-        """)
-        rc_ly.addWidget(self._ver_label)
+        self._ver_label.setStyleSheet(f"color:{T.TEXT3};font-size:10px;padding:0 4px;")
+        bot_ly.addWidget(self._ver_label)
+        sb_ly.addWidget(bottom_w)
 
-        tn_ly.addWidget(right_container)
-
-        self.top_nav = top_nav
-        root.addWidget(top_nav)
+        self.sidebar = sidebar
+        root.addWidget(sidebar)
 
         # ═══ Content Area ═══
         self.right_widget = QWidget()
@@ -1086,19 +1070,13 @@ class SmartRPAGUI(QMainWindow):
     def _refresh_all_styles(self):
         """Refresh all inline styles after theme switch."""
         # Top nav bar
-        self.top_nav.setStyleSheet(f"background: {T.SURFACE};")
+        self.sidebar.setStyleSheet(f"background: {T.BG};")
 
         self.right_widget.setStyleSheet(f"background: {T.BG};")
 
         # Logo
         if hasattr(self, '_logo_label'):
-            self._logo_label.setStyleSheet(f"""
-                font-size: 15px;
-                font-weight: 800;
-                color: {T.TEXT};
-                letter-spacing: -0.3px;
-                padding: 0 12px 0 4px;
-            """)
+            self._logo_label.setStyleSheet(f"font-size:16px;font-weight:700;color:{T.TEXT};letter-spacing:-0.3px;")
 
         # Version label
         if hasattr(self, '_ver_label'):
@@ -1118,9 +1096,7 @@ class SmartRPAGUI(QMainWindow):
         self.run_btn.setStyleSheet("")  # clear cached template
         self._update_run_btn_style()
 
-        # Pulse dot base color
-        if not self._running:
-            self.pulse_dot.set_color(T.TEXT3)
+
 
         # Bottom status bar
         self.status_lbl.setStyleSheet(f"color:{T.TEXT3};")
@@ -1214,9 +1190,9 @@ class SmartRPAGUI(QMainWindow):
             color: {T.GREEN};
             font-size: 12px;
             font-weight: 600;
-            padding: 5px 14px;
-            min-height: 32px;
-            max-height: 32px;
+            padding: 4px 10px;
+            min-height: 26px;
+            max-height: 26px;
             background: {T.GREEN_BG};
             border-radius: {T.R_SM}px;
             border: 1px solid {T.GREEN}22;
@@ -1637,10 +1613,12 @@ class SmartRPAGUI(QMainWindow):
                     background: {T.RED_BG};
                     color: {T.RED};
                     border: 1px solid {T.DANGER_BORDER};
-                    border-radius: {T.R_LG}px;
-                    font-weight: 600;  /* ← 自定义停止状态按钮字号 */
-                    font-size: 14px;  /* ← 自定义停止状态按钮字号 */
-                    padding: 10px 0;
+                    border-radius: {T.R_SM}px;
+                    font-weight: 600;
+                    font-size: 12px;
+                    padding: 5px 0;
+                    min-height: 26px;
+                    max-height: 26px;
                 }}
                 QPushButton:hover {{
                     background: {T.DANGER_HOVER_BG};
@@ -1650,22 +1628,18 @@ class SmartRPAGUI(QMainWindow):
         else:
             self.run_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                        stop:0 {T.ACCENT}, stop:1 #60a5fa);
+                    background: {T.ACCENT};
                     color: white;
                     border: none;
-                    border-radius: {T.R_LG}px;
-                    font-weight: 600;  /* ← 自定义运行状态按钮字号 */
-                    font-size: 14px;  /* ← 自定义运行状态按钮字号 */
-                    padding: 10px 0;
+                    border-radius: {T.R_SM}px;
+                    font-weight: 600;
+                    font-size: 12px;
+                    padding: 5px 0;
+                    min-height: 26px;
+                    max-height: 26px;
                 }}
                 QPushButton:hover {{
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                        stop:0 {T.ACCENT2}, stop:1 #93c5fd);
-                }}
-                QPushButton:disabled {{
-                    background: {T.LINE};
-                    color: {T.TEXT3};
+                    background: {T.ACCENT2};
                 }}
             """)
 
@@ -2394,10 +2368,9 @@ class SmartRPAGUI(QMainWindow):
         self._update_run_btn_style()
         self.progress.show()
 
-        self.pulse_dot.set_color(T.ACCENT)
-        self.pulse_dot.start_pulse()
+        self.state_lbl.setStyleSheet(f"color:{T.ACCENT2};font-size:11px;padding:0 4px;")
         self.state_lbl.setText("运行中")
-        self.state_lbl.setStyleSheet(f"color:{T.ACCENT2}; font-size:12px; font-weight:600; padding: 0 8px 0 4px;")  # ← 自定义运行中文字字号
+
 
         self.worker = TaskWorker(
             path, self.tpl_combo.currentText() or None,
@@ -2444,10 +2417,9 @@ class SmartRPAGUI(QMainWindow):
         self.run_btn.setText("\u25B6  开始运行")
         self._update_run_btn_style()
         self.progress.hide()
-        self.pulse_dot.stop_pulse()
-        self.pulse_dot.set_color(T.TEXT3)
+        self.state_lbl.setStyleSheet(f"color:{T.TEXT3};font-size:11px;padding:0 4px;")
         self.state_lbl.setText("就绪")
-        self.state_lbl.setStyleSheet(f"color:{T.TEXT2}; font-size:12px; font-weight:500; padding: 0 8px 0 4px;")  # ← 自定义状态文字字号（就绪）
+        self.state_lbl.setStyleSheet(f"color:{T.TEXT3};font-size:11px;padding:0 4px;")
 
     def _copy_log(self):
         """Copy log content to clipboard."""
