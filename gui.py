@@ -1703,7 +1703,7 @@ class SmartRPAGUI(QMainWindow):
         left_ly.addWidget(section_title("任务名称"))
         self.ed_name = QComboBox()
         self.ed_name.setEditable(True)
-        self.ed_name.setStyleSheet(f"""QComboBox{{background:{T.GREEN_BG};color:{T.GREEN};border:1px solid {T.GREEN}22;border-radius:{T.R_SM}px;padding:5px 14px;min-height:32px;max-height:32px;font-weight:600;font-size:12px;}}QComboBox::drop-down{{border:none;width:24px;}}QComboBox:hover{{background:{T.GREEN_BG};border:1px solid {T.GREEN}44;}}""")
+        self.ed_name.setStyleSheet(f"""QComboBox{{background:{T.CARD};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_SM}px;padding:5px 14px;min-height:26px;max-height:26px;font-weight:600;font-size:12px;}}QComboBox::drop-down{{border:none;width:24px;}}QComboBox:hover{{background:{T.SURFACE};border:1px solid {T.LINE_LIGHT};}}""")
         left_ly.addWidget(self.ed_name)
 
         left_ly.addWidget(section_title("操作"))
@@ -1719,7 +1719,8 @@ class SmartRPAGUI(QMainWindow):
         rec_row = QHBoxLayout(); rec_row.setSpacing(T.SP_SM)
         self.rec_btn = QPushButton("⏺  录制")
         self.rec_btn.setCursor(Qt.PointingHandCursor)
-        self.rec_btn.setMinimumHeight(36)
+        self.rec_btn.setMinimumHeight(26)
+        self.rec_btn.setMaximumHeight(26)
         self.rec_btn.clicked.connect(self._toggle_record)
         self.rec_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1741,7 +1742,7 @@ class SmartRPAGUI(QMainWindow):
         left_ly.addWidget(self._ed_preview)
 
         del_row = QHBoxLayout(); del_row.setSpacing(T.SP_SM)
-        del_btn = btn_ghost("删"); del_btn.setToolTip("删除选中步骤")
+        del_btn = btn_ghost("删除"); del_btn.setToolTip("删除选中步骤")
         del_btn.clicked.connect(self._ed_del); del_row.addWidget(del_btn)
         edit_btn = btn_ghost("编辑"); edit_btn.setToolTip("编辑选中步骤参数")
         edit_btn.clicked.connect(self._ed_edit_step); del_row.addWidget(edit_btn)
