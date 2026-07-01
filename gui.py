@@ -1389,182 +1389,51 @@ class SmartRPAGUI(QMainWindow):
         ly = QVBoxLayout(page)
         ly.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
         ly.setSpacing(T.SP_LG)
+        # Two columns: left (task list top, config bottom) | right (log)
+        h_split = QSplitter(Qt.Horizontal)
+        h_split.setHandleWidth(1)
+        h_split.setStyleSheet(f"QSplitter::handle{{background:{T.LINE};}}")
 
-        split = QSplitter(Qt.Horizontal)
-        split.setHandleWidth(1)
-        split.setStyleSheet(f"QSplitter::handle{{background:{T.LINE};}}")
+        # LEFT: vertical split (task list above, config below)
+        left_split = QSplitter(Qt.Vertical)
+        left_split.setHandleWidth(1)
+        left_split.setStyleSheet(f"QSplitter::handle{{background:{T.LINE};}}")
 
-        # ── LEFT: Config Panel ──
-        self._config_card = QWidget()
-        self._config_card.setStyleSheet(f"""
-            background: {T.CARD};
-            border: none;
-            border-radius: {T.R_LG}px;
-        """)
-        Cl = QVBoxLayout(self._config_card)
-        Cl.setContentsMargins(T.SP_XL, T.SP_XL, T.SP_XL, T.SP_XL)
-        Cl.setSpacing(T.SP_LG)
-
-        # Task selection
-        Cl.addWidget(section_title("任务"))
-        tb = QHBoxLayout()
-        tb.setSpacing(T.SP_SM)
-        self.task_combo = QComboBox()
-        self.task_combo.setStyleSheet(f"""
-            QComboBox {{
-                background: {T.CARD};
+        # LEFT TOP: Task list
+        task_panel = QWidget()
+        task_panel.setStyleSheet(f"background:{T.CARD}; border:none; border-radius:{T.R_LG}px;")
+        task_layout = QVBoxLayout(task_panel)
+        task_layout.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
+        task_layout.setSpacing(T.SP_MD)
+        task_layout.addWidget(section_title("任务"))
+        self.task_list = QListWidget()
+        self.task_list.setFont(QFont("Microsoft YaHei", 10))
+        self.task_list.setStyleSheet(f"""
+            QListWidget {{
+                background: {T.SURFACE};
                 color: {T.TEXT};
                 border: 1px solid {T.LINE};
-                border-radius: {T.R_SM}px;
-                padding: 5px 14px;
-                min-height: 26px;
-                max-height: 26px;
-                font-weight: 600;
+                border-radius: {T.R_MD}px;
+                padding: 8px;
                 font-size: 12px;
+                outline: none;
             }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 24px;
+            QListWidget::item {{
+                padding: 6px 10px;
+                border-radius: 4px;
             }}
-            QComboBox::drop-down:on {{
-                background: {T.SURFACE};
-            }}
-            QComboBox:hover {{
-                background: {T.SURFACE};
-                border: 1px solid {T.LINE_LIGHT};
-            }}
-        """)
-        self.task_combo.currentIndexChanged.connect(self._on_task_changed)
-        tb.addWidget(self.task_combo, 1)
-        opt_btn = QPushButton("选项")
-        opt_btn.setCursor(Qt.PointingHandCursor)
-        opt_btn.setFixedWidth(64)
-        opt_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {T.SURFACE};
-                color: {T.TEXT2};
-                border: 1px solid {T.LINE};
-                border-radius: {T.R_SM}px;
-                padding: 5px 10px;
-                min-height: 26px;
-                max-height: 26px;
-                font-weight: 600;
-                font-size: 11px;
-            }}
-            QPushButton:hover {{ background: {T.CARD}; border: 1px solid {T.LINE_LIGHT}; }}
-            QPushButton::menu-indicator {{ image: none; width: 0; }}
-        """)
-        opt_menu = QMenu(opt_btn)
-        opt_menu.setStyleSheet(f"""
-            QMenu {{ background: {T.CARD}; color: {T.TEXT}; border: 1px solid {T.LINE}; border-radius: {T.R_SM}px; padding: 4px; }}
-            QMenu::item {{ padding: 6px 20px; border-radius: 4px; }}
-            QMenu::item:selected {{ background: {T.ACCENT_DIM}; }}
-        """)
-        rename_action = opt_menu.addAction("重命名")
-        rename_action.triggered.connect(self._ed_rename)
-        opt_menu.addSeparator()
-        export_action = opt_menu.addAction("导出为 ZIP")
-        export_action.triggered.connect(self._export_task)
-        import_action = opt_menu.addAction("从 ZIP 导入")
-        import_action.triggered.connect(self._import_task)
-        opt_menu.addSeparator()
-        delete_action = opt_menu.addAction("删除")
-        delete_action.triggered.connect(self._ed_delete_task)
-        opt_btn.setMenu(opt_menu)
-        tb.addWidget(opt_btn)
-        Cl.addLayout(tb)
-
-        # Template path
-        Cl.addWidget(section_title("模板路径"))
-        tpb = QHBoxLayout()
-        tpb.setSpacing(T.SP_SM)
-        self.tpl_combo = QComboBox()
-        self.tpl_combo.setEditable(True)
-        self.tpl_combo.setStyleSheet(f"""
-            QComboBox {{
-                background: {T.CARD};
+            QListWidget::item:selected {{
+                background: {T.ACCENT_DIM};
                 color: {T.TEXT};
-                border: 1px solid {T.LINE};
-                border-radius: {T.R_SM}px;
-                padding: 5px 14px;
-                min-height: 26px;
-                max-height: 26px;
-                font-weight: 600;
-                font-size: 12px;
             }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 24px;
-            }}
-            QComboBox:hover {{
-                background: {T.SURFACE};
-                border: 1px solid {T.LINE_LIGHT};
+            QListWidget::item:hover {{
+                background: {T.CARD_HOVER};
             }}
         """)
-        tpb.addWidget(self.tpl_combo, 1)
-        browse_btn = btn_ghost("浏览")
-        browse_btn.setFixedWidth(64)
-        browse_btn.clicked.connect(self._browse_tpl)
-        tpb.addWidget(browse_btn)
-        Cl.addLayout(tpb)
-
-        # Region
-        Cl.addWidget(section_title("操作区域"))
-        rb = QHBoxLayout()
-        rb.setSpacing(T.SP_SM)
-        self.region_lbl = status_pill("全屏")
-        rb.addWidget(self.region_lbl, 1)
-        region_btn = btn_ghost("框选")
-        region_btn.setFixedWidth(64)
-        region_btn.clicked.connect(self._select_region)
-        rb.addWidget(region_btn)
-        Cl.addLayout(rb)
-
-        # Loop count
-        Cl.addWidget(section_title("重复"))
-        lr = QHBoxLayout()
-        lr.setSpacing(T.SP_SM)
-        self.run_loop = QSpinBox()
-        self.run_loop.setRange(1, 9999)
-        self.run_loop.setValue(1)
-        self.run_loop.setFixedWidth(80)
-        self.run_loop.setStyleSheet(f"QSpinBox{{background:{T.CARD};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_SM}px;padding:5px 14px;min-height:26px;max-height:26px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.LINE_LIGHT};}}")
-        lr.addWidget(self.run_loop)
-        tl = QLabel("次")
-        tl.setStyleSheet(f"font-size:13px;font-weight:500;color:{T.TEXT2};")
-        lr.addWidget(tl)
-        lr.addStretch()
-        Cl.addLayout(lr)
-
-        # Speed mode toggle
-        Cl.addWidget(section_title("速度"))
-        speed_row = QHBoxLayout()
-        speed_row.setSpacing(T.SP_SM)
-        self.fast_toggle = QPushButton("⚡ 极速")
-        self.fast_toggle.setCheckable(True)
-        self.fast_toggle.setCursor(Qt.PointingHandCursor)
-        self.fast_toggle.setMinimumHeight(26)
-        self.fast_toggle.setMaximumHeight(26)
-        self.fast_toggle.toggled.connect(self._on_speed_toggle)
-        self._update_speed_btn_style(False)
-        speed_row.addWidget(self.fast_toggle)
-        speed_row.addStretch()
-        Cl.addLayout(speed_row)
-
-        Cl.addStretch(1)
-
-        # Run / Stop toggle at bottom of config panel
-        self.run_btn = QPushButton("\u25B6  开始运行")
-        self.run_btn.setCursor(Qt.PointingHandCursor)
-        self.run_btn.setMinimumHeight(26)
-        self.run_btn.setMaximumHeight(26)
-        self.run_btn.clicked.connect(self._toggle_run)
-        Cl.addWidget(self.run_btn)
-        self._update_run_btn_style()
-
-        split.addWidget(self._config_card)
-
-        # ── RIGHT: Log Panel ──
+        self.task_list.currentRowChanged.connect(self._on_task_list_selected)
+        task_layout.addWidget(self.task_list, 1)
+        left_split.addWidget(task_panel)
+        # RIGHT: Log Panel (full height)
         self._log_card = QWidget()
         self._log_card.setStyleSheet(f"""
             background: {T.CARD};
@@ -1574,8 +1443,6 @@ class SmartRPAGUI(QMainWindow):
         Rl = QVBoxLayout(self._log_card)
         Rl.setContentsMargins(T.SP_LG, T.SP_XL, T.SP_LG, T.SP_LG)
         Rl.setSpacing(T.SP_MD)
-
-        # Log header with inline copy button
         log_header = QHBoxLayout()
         log_header.setSpacing(T.SP_SM)
         log_header.addWidget(section_header("日志"))
@@ -1596,10 +1463,9 @@ class SmartRPAGUI(QMainWindow):
             font-size: 12px;
             selection-background-color: {T.ACCENT_DIM};
         """)
-        self.log.setFont(QFont("Cascadia Code,Consolas,monospace", 10))  # ← 自定义日志等宽字体
+        self.log.setFont(QFont("Cascadia Code,Consolas,monospace", 10))
         self.log.document().setMaximumBlockCount(2000)
         Rl.addWidget(self.log, 1)
-        # Clear log button
         clr_log_row = QHBoxLayout()
         clr_log_row.setSpacing(T.SP_SM)
         clr_log_btn = btn_ghost("清空日志")
@@ -1607,12 +1473,132 @@ class SmartRPAGUI(QMainWindow):
         clr_log_row.addWidget(clr_log_btn)
         clr_log_row.addStretch()
         Rl.addLayout(clr_log_row)
-        split.addWidget(self._log_card)
+        # Lower: Config Panel
+        self._config_card = QWidget()
+        self._config_card.setStyleSheet(f"""
+            background: {T.CARD};
+            border: none;
+            border-radius: {T.R_LG}px;
+        """)
+        Cl = QVBoxLayout(self._config_card)
+        Cl.setContentsMargins(T.SP_XL, T.SP_XL, T.SP_XL, T.SP_XL)
+        Cl.setSpacing(T.SP_LG)
+        # Hidden combo for logic (synced with task_list)
+        self.task_combo = QComboBox()
+        self.task_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {T.CARD};
+                color: {T.TEXT};
+                border: 1px solid {T.LINE};
+                border-radius: {T.R_SM}px;
+                padding: 5px 14px;
+                min-height: 26px;
+                max-height: 26px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QComboBox::drop-down {{ border: none; width: 24px; }}
+            QComboBox:hover {{ background: {T.SURFACE}; border: 1px solid {T.LINE_LIGHT}; }}
+        """)
+        self.task_combo.currentIndexChanged.connect(self._on_task_changed)
+        self.task_combo.hide()
+        Cl.addWidget(self.task_combo)
+        Cl.addWidget(section_title("模板路径"))
+        tpb = QHBoxLayout()
+        tpb.setSpacing(T.SP_SM)
+        self.tpl_combo = QComboBox()
+        self.tpl_combo.setEditable(True)
+        self.tpl_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {T.CARD};
+                color: {T.TEXT};
+                border: 1px solid {T.LINE};
+                border-radius: {T.R_SM}px;
+                padding: 5px 14px;
+                min-height: 26px;
+                max-height: 26px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QComboBox::drop-down {{ border: none; width: 24px; }}
+            QComboBox:hover {{ background: {T.SURFACE}; border: 1px solid {T.LINE_LIGHT}; }}
+        """)
+        tpb.addWidget(self.tpl_combo, 1)
+        browse_btn = btn_ghost("浏览")
+        browse_btn.setFixedWidth(64)
+        browse_btn.clicked.connect(self._browse_tpl)
+        tpb.addWidget(browse_btn)
+        Cl.addLayout(tpb)
+        Cl.addWidget(section_title("操作区域"))
+        rb = QHBoxLayout()
+        rb.setSpacing(T.SP_SM)
+        self.region_lbl = status_pill("全屏")
+        rb.addWidget(self.region_lbl, 1)
+        region_btn = btn_ghost("框选")
+        region_btn.setFixedWidth(64)
+        region_btn.clicked.connect(self._select_region)
+        rb.addWidget(region_btn)
+        Cl.addLayout(rb)
+        Cl.addWidget(section_title("重复"))
+        lr = QHBoxLayout()
+        lr.setSpacing(T.SP_SM)
+        self.run_loop = QSpinBox()
+        self.run_loop.setRange(1, 9999)
+        self.run_loop.setValue(1)
+        self.run_loop.setFixedWidth(80)
+        self.run_loop.setStyleSheet(f"QSpinBox{{background:{T.CARD};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_SM}px;padding:5px 14px;min-height:26px;max-height:26px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.LINE_LIGHT};}}")
+        lr.addWidget(self.run_loop)
+        tl = QLabel("次")
+        tl.setStyleSheet(f"font-size:13px;font-weight:500;color:{T.TEXT2};")
+        lr.addWidget(tl)
+        lr.addStretch()
+        Cl.addLayout(lr)
+        Cl.addWidget(section_title("速度"))
+        speed_row = QHBoxLayout()
+        speed_row.setSpacing(T.SP_SM)
+        self.fast_toggle = QPushButton("⚡ 极速")
+        self.fast_toggle.setCheckable(True)
+        self.fast_toggle.setCursor(Qt.PointingHandCursor)
+        self.fast_toggle.setMinimumHeight(26)
+        self.fast_toggle.setMaximumHeight(26)
+        self.fast_toggle.toggled.connect(self._on_speed_toggle)
+        self._update_speed_btn_style(False)
+        speed_row.addWidget(self.fast_toggle)
+        speed_row.addStretch()
+        Cl.addLayout(speed_row)
+        Cl.addStretch(1)
+        self.run_btn = QPushButton("▶  开始运行")
+        self.run_btn.setCursor(Qt.PointingHandCursor)
+        self.run_btn.setMinimumHeight(26)
+        self.run_btn.setMaximumHeight(26)
+        self.run_btn.clicked.connect(self._toggle_run)
+        Cl.addWidget(self.run_btn)
+        self._update_run_btn_style()
 
-        split.setSizes([300, 540])
-        ly.addWidget(split, 1)
-
+        left_split.addWidget(self._config_card)
+        left_split.setSizes([300, 250])
+        h_split.addWidget(left_split)
+        h_split.addWidget(self._log_card)
+        h_split.setSizes([400, 500])
+        ly.addWidget(h_split, 1)
         return page
+    def _on_task_list_selected(self, idx):
+        """左列任务列表选中时同步更新隐藏的任务下拉框并触发配置加载."""
+        if idx < 0:
+            return
+        item = self.task_list.item(idx)
+        if not item:
+            return
+        task_name = item.text()
+        combo_idx = self.task_combo.findText(task_name)
+        if combo_idx >= 0:
+            self.task_combo.setCurrentIndex(combo_idx)
+
+    def _toggle_run(self):
+        if self._running:
+            self._stop()
+        else:
+            self._start()
 
     def _update_run_btn_style(self):
         """Update the run/stop button style based on running state."""
@@ -1654,9 +1640,8 @@ class SmartRPAGUI(QMainWindow):
 
     def _on_speed_toggle(self, checked):
         self._update_speed_btn_style(checked)
-        self.log_msg(f"速度模式: {'⚡ 极速' if checked else '🤖 普通'}", "INFO")
 
-    def _update_speed_btn_style(self, fast: bool):
+    def _update_speed_btn_style(self, fast):
         if fast:
             self.fast_toggle.setStyleSheet(
                 f"QPushButton{{background:{T.SURFACE};color:{T.TEXT};"
@@ -1673,17 +1658,6 @@ class SmartRPAGUI(QMainWindow):
                 f"min-height:26px;max-height:26px;}}"
                 f"QPushButton:hover{{border:1px solid {T.LINE_LIGHT};}}"
             )
-
-    def _toggle_run(self):
-        """Toggle between start and stop."""
-        if self._running:
-            self._stop()
-        else:
-            self._start()
-
-    # ══════════════════════════════════════
-    #  PAGE: 任务编辑器
-    # ══════════════════════════════════════
 
     def _editor_content(self):
         w = QWidget()
