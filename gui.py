@@ -47,7 +47,9 @@ from PySide6.QtCore import Qt, QThread, Signal, QRect, QTimer, QSettings, Slot
 from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon, QPixmap, QDesktopServices
 from PySide6.QtCore import QUrl
 
-from smartrpa import Controller, Vision, TaskEngine, PopupHandler, __version__
+from smartrpa import Controller, Vision, TaskEngine, BTEngine, PopupHandler, __version__
+from smartrpa.core.behavior_tree import ActionNode
+from smartrpa.ui.flow_editor import FlowEditor
 
 
 # ═══════════════════════════════════════════════
@@ -445,6 +447,16 @@ class TaskWorker(QThread):
         self.region = region
         self.fast_mode = fast_mode
         self._active = True
+        self._engine = None  # BTEngine or TaskEngine
+
+    def _is_bt_format(self, path):
+        """Detect if a task file uses the Behavior Tree format."""
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            return "root" in data
+        except Exception:
+            return False
 
     def run(self):
         try:
@@ -455,35 +467,59 @@ class TaskWorker(QThread):
             p = PopupHandler(v, c)
             p.enabled = not self.no_popup
             p.register_builtin_strategies()
-            engine = TaskEngine(c, v, p)
-            engine.region = self.region
-            engine._user_log = lambda m, l: self.log.emit(m, l)
+
             if self.fast_mode:
-                engine.controller.human.fast_mode = True
-            engine.load(self.task_file)
-            entry = list(engine._tasks.keys())[0]
-            # 窗口锚定：从 _meta 读取 window 标题
-            win_title = engine._meta.get("window")
-            if win_title:
-                engine.set_window_title(win_title)
-                self.log.emit(f"窗口锚定: '{win_title}'", "INFO")
-            self.log.emit(f"任务: {os.path.basename(self.task_file)}", "INFO")
-            orig = engine._execute_step
-            cnt = [0]
+                c.human.fast_mode = True
 
-            def hook(ss, t):
-                if not self._active:
-                    engine.stop()
-                    return False
-                cnt[0] += 1
-                self.step.emit(t.get("desc", ""))
-                return orig(ss, t)
+            use_bt = self._is_bt_format(self.task_file)
 
-            engine._execute_step = hook
-            engine.run(entry)
-            s = engine._stats
-            self.log.emit(f"完成: {s['steps']}步 {s['popups_handled']}弹窗 {s['errors']}错误", "SUCCESS")
-            self.finished.emit(s)
+            if use_bt:
+                # ── Behavior Tree Engine ──
+                engine = BTEngine(c, v, p)
+                if self.region:
+                    engine._ctx.anchor_offset = (self.region[0], self.region[1])
+                engine.load(self.task_file)
+                win_title = engine._meta.get("window")
+                if win_title:
+                    engine.set_window_title(win_title)
+                    self.log.emit(f"窗口锚定: '{win_title}'", "INFO")
+                self.log.emit(f"BT任务: {os.path.basename(self.task_file)}", "INFO")
+                self._engine = engine
+                engine.run()
+                s = engine._ctx.stats
+                self.log.emit(f"完成: {s['steps']}步 {s['popups_handled']}弹窗 {s['errors']}错误", "SUCCESS")
+                self.finished.emit(s)
+
+            else:
+                # ── Classic State Machine Engine ──
+                engine = TaskEngine(c, v, p)
+                engine.region = self.region
+                engine._user_log = lambda m, l: self.log.emit(m, l)
+                engine.load(self.task_file)
+                entry = list(engine._tasks.keys())[0]
+                win_title = engine._meta.get("window")
+                if win_title:
+                    engine.set_window_title(win_title)
+                    self.log.emit(f"窗口锚定: '{win_title}'", "INFO")
+                self.log.emit(f"任务: {os.path.basename(self.task_file)}", "INFO")
+                self._engine = engine
+                orig = engine._execute_step
+                cnt = [0]
+
+                def hook(ss, t):
+                    if not self._active:
+                        engine.stop()
+                        return False
+                    cnt[0] += 1
+                    self.step.emit(t.get("desc", ""))
+                    return orig(ss, t)
+
+                engine._execute_step = hook
+                engine.run(entry)
+                s = engine._stats
+                self.log.emit(f"完成: {s['steps']}步 {s['popups_handled']}弹窗 {s['errors']}错误", "SUCCESS")
+                self.finished.emit(s)
+
         except Exception as e:
             import traceback
             self.log.emit(str(e), "ERROR")
@@ -491,6 +527,8 @@ class TaskWorker(QThread):
 
     def stop(self):
         self._active = False
+        if self._engine:
+            self._engine.stop()
 
 
 # ═══════════════════════════════════════════════
@@ -1750,25 +1788,19 @@ class SmartRPAGUI(QMainWindow):
         mid_ly.addWidget(save)
         split.addWidget(mid_panel)
 
-        # ═══ RIGHT: steps list ═══
-        right_panel = QWidget()
-        right_panel.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
-        right_ly = QVBoxLayout(right_panel)
-        right_ly.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
-        right_ly.setSpacing(T.SP_MD)
-        right_ly.addWidget(section_title("步骤 (拖拽排序)"))
+        # ═══ RIGHT: flow editor ═══
+        self.flow_editor = FlowEditor()
+        split.addWidget(self.flow_editor)
 
+        # Hidden: old step list (used by _ed_load_path for compatibility)
         self.ed_list = QListWidget()
         self.ed_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.ed_list.setDefaultDropAction(Qt.MoveAction)
-        self.ed_list.setFont(QFont("Microsoft YaHei", 10))
-        self.ed_list.setStyleSheet(f"""QListWidget{{background:{T.SURFACE};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_MD}px;padding:8px;font-size:12px;outline:none;}}QListWidget::item{{padding:6px 10px;border-radius:4px;}}QListWidget::item:selected{{background:{T.ACCENT_DIM};color:{T.TEXT};}}QListWidget::item:hover{{background:{T.CARD_HOVER};}}""")
         self.ed_list.currentRowChanged.connect(self._on_ed_step_selected)
         self.ed_list.itemDoubleClicked.connect(self._ed_edit_step)
-        right_ly.addWidget(self.ed_list, 1)
+        self.ed_list.hide()
 
-        split.addWidget(right_panel)
-        split.setSizes([180, 260, 460])
+        split.setSizes([180, 260, 560])
         ly.addWidget(split, 1)
         return w
 
@@ -2253,6 +2285,12 @@ class SmartRPAGUI(QMainWindow):
             self.ed_list.addItem(desc)
         self.log_msg(f"已加载 {len(self._ed)} 个步骤", "SUCCESS")
 
+        # Also load into flow editor
+        if "root" in data:
+            self.flow_editor.load_bt_tree(data["root"])
+        elif steps:
+            self.flow_editor.load_flat_tasks(steps, entry)
+
     def _ed_rename(self):
         """Rename a user task by updating _meta.name in its task.json."""
         current = self.task_combo.currentText()
@@ -2391,6 +2429,34 @@ class SmartRPAGUI(QMainWindow):
         # Auto-select first item
         if self.task_combo.count() > 0:
             self.task_combo.setCurrentIndex(0)
+
+        # Scan for Behavior Tree task files (*.bt.json)
+        for scan_dir, prefix in [(ex, ""), (data_dir("tasks"), "")] if os.path.isdir(ex) else [(data_dir("tasks"), "")]:
+            if not os.path.isdir(scan_dir):
+                continue
+            for d in sorted(os.listdir(scan_dir)):
+                # Check task.bt.json in each task folder or directly
+                bt_file = os.path.join(scan_dir, d)
+                if os.path.isdir(bt_file):
+                    bt_file = os.path.join(bt_file, "task.bt.json")
+                elif not d.endswith(".bt.json"):
+                    continue
+                if not os.path.exists(bt_file):
+                    continue
+                # Read display name
+                try:
+                    with open(bt_file, encoding="utf-8") as f:
+                        bt_data = json.load(f)
+                    bt_meta = bt_data.get("_meta", {})
+                    bt_display = bt_meta.get("name", os.path.splitext(
+                        os.path.basename(d))[0]) if isinstance(bt_meta, dict) else d
+                except (json.JSONDecodeError, IOError):
+                    continue
+                # Add BT suffix
+                bt_key = f"{bt_display} [BT]"
+                if bt_key not in self._task_map:
+                    self._task_map[bt_key] = bt_file
+                    self.task_combo.addItem(bt_key)
 
         # Refresh tasks page list
         if hasattr(self, 'task_list'):

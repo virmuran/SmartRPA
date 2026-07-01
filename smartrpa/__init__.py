@@ -2,8 +2,10 @@
 from .core.controller import Controller
 from .core.vision import Vision, Found
 from .core.engine import TaskEngine
+from .core.behavior_tree import BTEngine
 from .core.popup import PopupHandler
 from .core.human import HumanLike
 
-__version__ = "0.7.1"
-__all__ = ['Controller', 'Vision', 'Found', 'TaskEngine', 'PopupHandler', 'HumanLike']
+__version__ = "0.7.2"
+__all__ = ['Controller', 'Vision', 'Found', 'TaskEngine', 'BTEngine',
+           'PopupHandler', 'HumanLike']

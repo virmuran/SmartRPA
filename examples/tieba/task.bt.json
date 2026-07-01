@@ -1,0 +1,125 @@
+{
+    "_meta": {
+        "name": "贴吧签到 (BT)",
+        "window": "*百度贴吧*",
+        "retry_on_failure": 3,
+        "global_timeout": 600
+    },
+    "_comment": "Behavior Tree version. Key improvements over old format:",
+    "_comment2": "  - Task-level retry: whole workflow restarts 3 times on any failure",
+    "_comment3": "  - Global timeout: 10 min cap prevents infinite hangs",
+    "_comment4": "  - Selector nodes provide explicit fallback paths",
+    "_comment5": "  - Repeat node elegantly handles the signin loop",
+
+    "root": {
+        "type": "timeout",
+        "name": "全局超时 (10分钟)",
+        "seconds": 600,
+        "child": {
+            "type": "sequence",
+            "name": "签到完整流程",
+            "children": [
+                { "type": "exec", "name": "启动 Edge 浏览器", "cmd": "start msedge https://tieba.baidu.com" },
+                { "type": "hotkey", "name": "最大化窗口", "keys": ["win", "up"] },
+
+                {
+                    "type": "selector",
+                    "name": "等待页面并切换旧版",
+                    "children": [
+                        {
+                            "type": "sequence",
+                            "name": "正常流程",
+                            "children": [
+                                { "type": "wait_until", "name": "等待首页加载", "template": "switch_old_btn", "threshold": 0.75, "timeout": 30, "interval": 0.5 },
+                                { "type": "click", "name": "切换到旧版", "template": "switch_old_btn", "threshold": 0.75, "multi_scale": true, "retry": {"count": 2, "interval": 1.0} }
+                            ]
+                        },
+                        { "type": "log", "name": "已在旧版，跳过", "msg": "旧版切换跳过（可能已在旧版）" }
+                    ]
+                },
+
+                { "type": "wait_until", "name": "等待旧版加载", "template": "onekey_signin", "threshold": 0.75, "timeout": 20, "interval": 0.5 },
+                { "type": "click", "name": "一键签到 (7级以上)", "template": "onekey_signin", "threshold": 0.75, "multi_scale": true, "retry": {"count": 2, "interval": 1.0} },
+
+                {
+                    "type": "selector",
+                    "name": "一键签到弹窗处理",
+                    "children": [
+                        {
+                            "type": "sequence",
+                            "name": "弹窗签到流程",
+                            "children": [
+                                { "type": "wait_until", "name": "等待弹窗", "template": "start_signin", "threshold": 0.8, "timeout": 10, "interval": 0.3 },
+                                { "type": "click", "name": "开始签到", "template": "start_signin", "threshold": 0.8, "retry": {"count": 2, "interval": 1.0} },
+                                { "type": "wait_until", "name": "等待完成", "template": "close_popup", "threshold": 0.75, "timeout": 15, "interval": 0.5 }
+                            ]
+                        },
+                        { "type": "log", "name": "无需一键签到", "msg": "一键签到弹窗未出现，继续" }
+                    ]
+                },
+
+                {
+                    "type": "retry",
+                    "name": "关闭弹窗 (重试3次)",
+                    "count": 3,
+                    "interval": 0.5,
+                    "child": {
+                        "type": "click",
+                        "name": "关闭结果弹窗",
+                        "template": "close_popup",
+                        "threshold": 0.75,
+                        "verify": {"disappear": true, "timeout": 2.0, "retry": 4}
+                    }
+                },
+
+                { "type": "move", "name": "悬停查看更多", "template": "view_more", "threshold": 0.75, "multi_scale": true, "retry": {"count": 2, "interval": 1.0} },
+                { "type": "wait_until", "name": "等待列表展开", "template": "grey_star", "threshold": 0.75, "timeout": 8, "interval": 0.3 },
+
+                {
+                    "type": "repeat",
+                    "name": "循环签到每个吧",
+                    "max_iterations": 200,
+                    "child": {
+                        "type": "selector",
+                        "name": "签到单个吧 (或结束)",
+                        "children": [
+                            {
+                                "type": "sequence",
+                                "name": "找到一个并签到",
+                                "children": [
+                                    { "type": "find", "name": "查找灰色星星", "template": "grey_star", "threshold": 0.75, "multi_scale": true },
+                                    { "type": "click", "name": "进入贴吧", "template": "grey_star", "threshold": 0.75, "multi_scale": true, "retry": {"count": 2, "interval": 1.0} },
+                                    { "type": "wait_until", "name": "等待贴吧加载", "template": "signin_btn_tieba", "threshold": 0.8, "timeout": 15, "interval": 0.5 },
+
+                                    {
+                                        "type": "selector",
+                                        "name": "签到或跳过",
+                                        "children": [
+                                            {
+                                                "type": "sequence",
+                                                "name": "点击签到",
+                                                "children": [
+                                                    { "type": "click", "name": "点击签到", "template": "signin_btn_tieba", "threshold": 0.8, "multi_scale": true },
+                                                    { "type": "wait_until", "name": "等待签到完成", "template": "check_mark", "threshold": 0.8, "timeout": 10, "interval": 0.3 }
+                                                ]
+                                            },
+                                            { "type": "log", "name": "已签到，跳过", "msg": "该吧已签到" }
+                                        ]
+                                    },
+
+                                    { "type": "click", "name": "返回首页", "template": "logo", "threshold": 0.75, "multi_scale": true, "retry": {"count": 2, "interval": 1.0} },
+                                    { "type": "wait_until", "name": "等待首页加载", "template": "view_more", "threshold": 0.75, "timeout": 15, "interval": 0.5 },
+                                    { "type": "move", "name": "悬停查看更多", "template": "view_more", "threshold": 0.75, "multi_scale": true },
+                                    { "type": "wait_until", "name": "等待列表刷新", "template": "grey_star", "threshold": 0.75, "timeout": 8, "interval": 0.3 }
+                                ]
+                            },
+                            { "type": "log", "name": "全部签完", "msg": "未找到灰色星星，所有吧已签到完毕" }
+                        ]
+                    }
+                },
+
+                { "type": "log", "name": "签到完成", "msg": "贴吧签到任务成功完成" }
+            ]
+        }
+    }
+}
