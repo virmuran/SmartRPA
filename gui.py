@@ -2238,6 +2238,14 @@ class SmartRPAGUI(QMainWindow):
         if idx >= 0:
             self.ed_name.setCurrentIndex(idx)
         self._ed_task_dir = os.path.dirname(path)
+
+        # Behavior Tree format: load flow editor directly, skip flat extraction
+        if "root" in data:
+            self.flow_editor.load_bt_tree(data["root"])
+            self.log_msg(f"已加载 BT 任务 ({data['_meta'].get('name', '')})", "SUCCESS")
+            return
+
+        # Classic flat format
         steps = {}
         for k, v in data.items():
             if k.startswith("_") or not isinstance(v, dict) or "action" not in v:
@@ -2285,11 +2293,8 @@ class SmartRPAGUI(QMainWindow):
             self.ed_list.addItem(desc)
         self.log_msg(f"已加载 {len(self._ed)} 个步骤", "SUCCESS")
 
-        # Also load into flow editor
-        if "root" in data:
-            self.flow_editor.load_bt_tree(data["root"])
-        elif steps:
-            self.flow_editor.load_flat_tasks(steps, entry)
+        # Load into flow editor
+        self.flow_editor.load_flat_tasks(steps, entry)
 
     def _ed_rename(self):
         """Rename a user task by updating _meta.name in its task.json."""

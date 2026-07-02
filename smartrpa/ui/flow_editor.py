@@ -103,6 +103,8 @@ class FlowNode(QGraphicsRectItem):
 
     def __init__(self, node_id: str, name: str, node_type: str = "action",
                  config: dict = None, x: float = 0, y: float = 0):
+        # QGraphicsRectItem is NOT a QObject -- can't use Signal on it.
+        # Use callback attributes instead; set by FlowScene.add_node.
         super().__init__(0, 0, NODE_W, NODE_H)
         self.setPos(x, y)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
@@ -118,6 +120,10 @@ class FlowNode(QGraphicsRectItem):
 
         self._hovered = False
         self._selected = False
+
+        # Callbacks (set by FlowScene)
+        self._on_dclick = lambda cfg: None
+        self._on_select = lambda cfg: None
 
         # Color based on type
         self._bg = TYPE_COLORS.get(node_type, C_NODE_ACTION)
@@ -223,12 +229,12 @@ class FlowNode(QGraphicsRectItem):
         super().hoverLeaveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        self.nodeDoubleClicked.emit(self.config)
+        self._on_dclick(self.config)
         super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.nodeSelected.emit(self.config)
+            self._on_select(self.config)
         super().mousePressEvent(event)
 
     def itemChange(self, change, value):
@@ -376,8 +382,9 @@ class FlowScene(QGraphicsScene):
                  config: dict = None, x: float = 0, y: float = 0) -> FlowNode:
         """Add a node to the scene."""
         node = FlowNode(node_id, name, node_type, config, x, y)
-        node.nodeDoubleClicked.connect(self.nodeDoubleClicked.emit)
-        node.nodeSelected.connect(self.nodeSelected.emit)
+        # Use callbacks (FlowNode is not a QObject, can't use signals)
+        node._on_dclick = self.nodeDoubleClicked.emit
+        node._on_select = self.nodeSelected.emit
         self.addItem(node)
         self._nodes[node_id] = node
         return node
@@ -414,13 +421,14 @@ class FlowScene(QGraphicsScene):
         """
         self.clear_all()
 
-        # Topological depth calculation
+        # Topological depth calculation (handles cycles via back-edge detection)
         depths: Dict[str, int] = {}
-        visited = set()
+        visiting = set()
 
         def calc_depth(node_id: str, depth: int):
-            if node_id is None or node_id in visited:
-                return
+            if node_id is None or node_id in visiting:
+                return  # Cycle detected, don't recurse
+            visiting.add(node_id)
             if depth > depths.get(node_id, -1):
                 depths[node_id] = depth
             task = tasks.get(node_id, {})
@@ -428,8 +436,9 @@ class FlowScene(QGraphicsScene):
                 calc_depth(next_id, depth + 1)
             for next_id in (task.get("onErrorNext") or []):
                 calc_depth(next_id, depth + 1)
+            visiting.discard(node_id)
 
-        visited.clear()
+
         calc_depth(entry, 0)
 
         # For nodes not reachable, assign depth 0
