@@ -1008,7 +1008,7 @@ class SmartRPAGUI(QMainWindow):
         sb_ly.addSpacing(8)
 
         self.nav_btns = []
-        nav_items = [("📋","自动化任务"),("✏️","任务编辑器"),("⚙","设置"),("ℹ","关于")]
+        nav_items = [("📋","自动化任务"),("🗂","流程编辑"),("✏️","任务编辑器"),("⚙","设置"),("ℹ","关于")]
         for icon, label in nav_items:
             btn = SidebarButton(icon, label)
             btn.clicked.connect(lambda idx=len(self.nav_btns): self._switch_page(idx))
@@ -1054,13 +1054,15 @@ class SmartRPAGUI(QMainWindow):
         # ── Content Stack ──
         self.content_stack = QStackedWidget()
         self._tasks_page = self._tasks_content()
+        self._flow_page = self._flow_content()
         self._editor_page = self._editor_content()
         self._settings_page = self._settings_content()
         self._about_page = self._about_content()
-        self.content_stack.addWidget(self._tasks_page)
-        self.content_stack.addWidget(self._editor_page)
-        self.content_stack.addWidget(self._settings_page)
-        self.content_stack.addWidget(self._about_page)
+        self.content_stack.addWidget(self._tasks_page)     # 0
+        self.content_stack.addWidget(self._flow_page)      # 1
+        self.content_stack.addWidget(self._editor_page)    # 2
+        self.content_stack.addWidget(self._settings_page)  # 3
+        self.content_stack.addWidget(self._about_page)     # 4
         right_ly.addWidget(self.content_stack, 1)
 
         # ── Status Bar ──
@@ -1419,6 +1421,79 @@ class SmartRPAGUI(QMainWindow):
 
     # ══════════════════════════════════════
     #  PAGE: 自动化任务 (3-column Bento)
+    # ══════════════════════════════════════
+    #  PAGE: 流程编辑 (full-screen BT/flow view)
+    # ══════════════════════════════════════
+
+    def _flow_content(self):
+        w = QWidget()
+        w.setStyleSheet(f"background:{T.BG};")
+        ly = QVBoxLayout(w)
+        ly.setContentsMargins(0, 0, 0, 0)
+        ly.setSpacing(0)
+
+        # ── Top bar: task selector ──
+        top = QWidget()
+        top.setStyleSheet(f"background:{T.CARD};border-bottom:1px solid {T.LINE};")
+        top_ly = QHBoxLayout(top)
+        top_ly.setContentsMargins(T.SP_LG, T.SP_SM, T.SP_LG, T.SP_SM)
+        top_ly.setSpacing(T.SP_MD)
+
+        top_ly.addWidget(section_header("任务"))
+
+        self.flow_task_combo = QComboBox()
+        self.flow_task_combo.setMinimumWidth(240)
+        self.flow_task_combo.setStyleSheet(f"""
+            QComboBox {{background:{T.SURFACE};color:{T.TEXT};border:1px solid {T.LINE};
+                border-radius:{T.R_SM}px;padding:4px 12px;min-height:26px;max-height:26px;
+                font-size:12px;}}
+            QComboBox::drop-down {{border:none;width:22px;}}
+            QComboBox QAbstractItemView {{background:{T.CARD};color:{T.TEXT};}}
+        """)
+        self.flow_task_combo.currentTextChanged.connect(self._on_flow_task_selected)
+        top_ly.addWidget(self.flow_task_combo)
+        top_ly.addStretch(1)
+
+        ly.addWidget(top)
+
+        # ── Flow editor (full canvas) ──
+        self.flow_editor = FlowEditor()
+        self.flow_editor.taskEdited.connect(lambda path, data: self._on_flow_saved(path))
+        ly.addWidget(self.flow_editor, 1)
+        return w
+
+    def _on_flow_saved(self, path):
+        """Refresh task list after flow editor save."""
+        self.log_msg(f"已保存: {os.path.basename(path)}", "SUCCESS")
+        self._scan()
+
+    def _on_flow_task_selected(self, name):
+        """When a task is selected in the flow editor page, load it."""
+        if not name:
+            return
+        path = self._task_map.get(name)
+        if not path:
+            return
+        self.flow_editor.set_current_file(path)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            self.log_msg(f"加载失败: {e}", "ERROR")
+            return
+        if "root" in data:
+            self.flow_editor.load_bt_tree(data["root"])
+        else:
+            steps = {k: v for k, v in data.items()
+                     if isinstance(v, dict) and not k.startswith('_') and "action" in v}
+            if steps:
+                referenced = set()
+                for k, v in steps.items():
+                    for n in (v.get("next") or []):
+                        referenced.add(n)
+                entry = next((k for k in steps if k not in referenced), list(steps.keys())[0])
+                self.flow_editor.load_flat_tasks(steps, entry)
+
     # ══════════════════════════════════════
 
     def _tasks_content(self):
@@ -1788,19 +1863,25 @@ class SmartRPAGUI(QMainWindow):
         mid_ly.addWidget(save)
         split.addWidget(mid_panel)
 
-        # ═══ RIGHT: flow editor ═══
-        self.flow_editor = FlowEditor()
-        split.addWidget(self.flow_editor)
+        # ═══ RIGHT: steps list ═══
+        right_panel = QWidget()
+        right_panel.setStyleSheet(f"background:{T.CARD};border:none;border-radius:{T.R_LG}px;")
+        right_ly = QVBoxLayout(right_panel)
+        right_ly.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
+        right_ly.setSpacing(T.SP_MD)
+        right_ly.addWidget(section_title("步骤 (拖拽排序)"))
 
-        # Hidden: old step list (used by _ed_load_path for compatibility)
         self.ed_list = QListWidget()
         self.ed_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.ed_list.setDefaultDropAction(Qt.MoveAction)
+        self.ed_list.setFont(QFont("Microsoft YaHei", 10))
+        self.ed_list.setStyleSheet(f"""QListWidget{{background:{T.SURFACE};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_MD}px;padding:8px;font-size:12px;outline:none;}}QListWidget::item{{padding:6px 10px;border-radius:4px;}}QListWidget::item:selected{{background:{T.ACCENT_DIM};color:{T.TEXT};}}QListWidget::item:hover{{background:{T.CARD_HOVER};}}""")
         self.ed_list.currentRowChanged.connect(self._on_ed_step_selected)
         self.ed_list.itemDoubleClicked.connect(self._ed_edit_step)
-        self.ed_list.hide()
+        right_ly.addWidget(self.ed_list, 1)
+        split.addWidget(right_panel)
 
-        split.setSizes([180, 260, 560])
+        split.setSizes([180, 260, 460])
         ly.addWidget(split, 1)
         return w
 
@@ -2239,10 +2320,11 @@ class SmartRPAGUI(QMainWindow):
             self.ed_name.setCurrentIndex(idx)
         self._ed_task_dir = os.path.dirname(path)
 
-        # Behavior Tree format: load flow editor directly, skip flat extraction
+        # Behavior Tree format: skip flat extraction, hint user
         if "root" in data:
-            self.flow_editor.load_bt_tree(data["root"])
-            self.log_msg(f"已加载 BT 任务 ({data['_meta'].get('name', '')})", "SUCCESS")
+            self.log_msg("这是 BT 格式任务，请到「流程编辑」页面查看", "INFO")
+            if hasattr(self, 'flow_editor'):
+                self.flow_editor.load_bt_tree(data["root"])
             return
 
         # Classic flat format
@@ -2293,8 +2375,11 @@ class SmartRPAGUI(QMainWindow):
             self.ed_list.addItem(desc)
         self.log_msg(f"已加载 {len(self._ed)} 个步骤", "SUCCESS")
 
-        # Load into flow editor
-        self.flow_editor.load_flat_tasks(steps, entry)
+        # Update flow editor if visible on the flow page
+        if hasattr(self, 'flow_editor') and "root" in data:
+            self.flow_editor.load_bt_tree(data["root"])
+        elif hasattr(self, 'flow_editor') and steps:
+            self.flow_editor.load_flat_tasks(steps, entry)
 
     def _ed_rename(self):
         """Rename a user task by updating _meta.name in its task.json."""
@@ -2470,6 +2555,19 @@ class SmartRPAGUI(QMainWindow):
                 self.task_list.addItem(name)
             if self.task_list.count() > 0:
                 self.task_list.setCurrentRow(0)
+
+        # Refresh flow page task selector
+        if hasattr(self, 'flow_task_combo'):
+            current = self.flow_task_combo.currentText()
+            self.flow_task_combo.blockSignals(True)
+            self.flow_task_combo.clear()
+            self.flow_task_combo.addItem("")  # empty = no selection
+            for name in self._task_map:
+                self.flow_task_combo.addItem(name)
+            idx = self.flow_task_combo.findText(current)
+            if idx >= 0:
+                self.flow_task_combo.setCurrentIndex(idx)
+            self.flow_task_combo.blockSignals(False)
 
         # Refresh editor task list
         if hasattr(self, 'ed_task_list'):

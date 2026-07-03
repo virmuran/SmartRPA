@@ -125,9 +125,15 @@ class FlowNode(QGraphicsRectItem):
         # Callbacks (set by FlowScene)
         self._on_dclick = lambda cfg: None
         self._on_select = lambda cfg: None
+        self._on_port_start = lambda node_id, port: None
+        self._on_port_move = lambda pos: None
+        self._on_port_end = lambda pos: None
 
         # Programmatic move flag (skip snap in layout mode)
         self._layout_mode = False
+
+        # Port drag state
+        self._dragging_port: Optional[str] = None  # "success" or "failure"
 
         # Color based on type
         self._bg = TYPE_COLORS.get(node_type, C_NODE_ACTION)
@@ -208,15 +214,24 @@ class FlowNode(QGraphicsRectItem):
         painter.drawText(QRectF(0, NODE_H - 16, NODE_W - 10, 14),
                         Qt.AlignRight | Qt.AlignVCenter, self.node_type)
 
-        # Ports indicators (small circles at edges)
-        if self._hovered or self.isSelected():
-            painter.setPen(Qt.NoPen)
-            # Success port (right, upper half)
-            painter.setBrush(C_SUCCESS)
-            painter.drawEllipse(QPointF(NODE_W, NODE_H * 0.33), 5, 5)
-            # Failure port (right, lower half)
-            painter.setBrush(C_FAILURE)
-            painter.drawEllipse(QPointF(NODE_W, NODE_H * 0.67), 5, 5)
+        # Ports (always visible for connection dragging)
+        port_r = 6
+        painter.setPen(QPen(C_SUCCESS.darker(120), 1.5))
+        painter.setBrush(C_SUCCESS)
+        painter.drawEllipse(QPointF(NODE_W, NODE_H * 0.33), port_r, port_r)
+        painter.setPen(QPen(C_FAILURE.darker(120), 1.5))
+        painter.setBrush(C_FAILURE)
+        painter.drawEllipse(QPointF(NODE_W, NODE_H * 0.67), port_r, port_r)
+
+        # Port labels
+        tiny_font = QFont("Microsoft YaHei", 7)
+        painter.setFont(tiny_font)
+        painter.setPen(C_SUCCESS.darker(150))
+        painter.drawText(QRectF(NODE_W + 8, NODE_H * 0.33 - 8, 20, 16),
+                        Qt.AlignLeft, "S")
+        painter.setPen(C_FAILURE.darker(150))
+        painter.drawText(QRectF(NODE_W + 8, NODE_H * 0.67 - 8, 20, 16),
+                        Qt.AlignLeft, "F")
 
         # Update port positions
         self._success_port = QPointF(NODE_W, NODE_H * 0.33)
@@ -236,12 +251,44 @@ class FlowNode(QGraphicsRectItem):
         self._on_dclick(self.config)
         super().mouseDoubleClickEvent(event)
 
+    def port_hit_test(self, scene_pos: QPointF) -> Optional[str]:
+        """Check if scene_pos hits a port. Returns 'success', 'failure', or None."""
+        local = self.mapFromScene(scene_pos)
+        sp = QPointF(NODE_W, NODE_H * 0.33)
+        fp = QPointF(NODE_W, NODE_H * 0.67)
+        r = 10  # hit radius
+        d1 = (local.x() - sp.x()) ** 2 + (local.y() - sp.y()) ** 2
+        d2 = (local.x() - fp.x()) ** 2 + (local.y() - fp.y()) ** 2
+        if d1 < r * r:
+            return "success"
+        if d2 < r * r:
+            return "failure"
+        return None
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            port = self.port_hit_test(event.scenePos())
+            if port:
+                self._dragging_port = port
+                self._on_port_start(self.node_id, port)
+                event.accept()
+                return
             self._on_select(self.config)
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):
+        if self._dragging_port:
+            self._on_port_move(event.scenePos())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event):
+        if self._dragging_port:
+            self._on_port_end(event.scenePos())
+            self._dragging_port = None
+            event.accept()
+            return
         if self.scene():
             getattr(self.scene(), '_clear_guides', lambda: None)()
         super().mouseReleaseEvent(event)
@@ -377,6 +424,11 @@ class FlowScene(QGraphicsScene):
         self._grid_visible = True
         self._guide_items: List[QGraphicsLineItem] = []
 
+        # Connection drag state
+        self._drag_src_node: Optional[FlowNode] = None
+        self._drag_src_port: Optional[str] = None
+        self._temp_line: Optional[QGraphicsPathItem] = None
+
     def _show_guides(self, moving_node: FlowNode, new_pos: QPointF):
         """Show alignment guides when dragging a node."""
         self._clear_guides()
@@ -445,9 +497,65 @@ class FlowScene(QGraphicsScene):
         # Use callbacks (FlowNode is not a QObject, can't use signals)
         node._on_dclick = self.nodeDoubleClicked.emit
         node._on_select = self.nodeSelected.emit
+        node._on_port_start = self._on_node_port_start
+        node._on_port_move = self._on_node_port_move
+        node._on_port_end = self._on_node_port_end
         self.addItem(node)
         self._nodes[node_id] = node
         return node
+
+    # ── Connection dragging ──
+
+    def _on_node_port_start(self, node_id: str, port: str):
+        self._drag_src_node = self._nodes.get(node_id)
+        self._drag_src_port = port
+
+        # Create temp line
+        self._temp_line = QGraphicsPathItem()
+        if port == "success":
+            self._temp_line.setPen(QPen(C_SUCCESS, 2))
+        else:
+            self._temp_line.setPen(QPen(C_FAILURE, 1.5, Qt.DashLine))
+        self._temp_line.setZValue(100)
+        self.addItem(self._temp_line)
+
+    def _on_node_port_move(self, scene_pos: QPointF):
+        if not self._temp_line or not self._drag_src_node:
+            return
+        if self._drag_src_port == "success":
+            src = self._drag_src_node.success_port
+        else:
+            src = self._drag_src_node.failure_port
+
+        # Bezier from port to cursor
+        path = QPainterPath()
+        path.moveTo(src)
+        dx = scene_pos.x() - src.x()
+        ctrl_dist = max(abs(dx) * 0.4, 40)
+        c1 = QPointF(src.x() + ctrl_dist, src.y())
+        c2 = QPointF(scene_pos.x() - ctrl_dist, scene_pos.y())
+        path.cubicTo(c1, c2, scene_pos)
+        self._temp_line.setPath(path)
+
+    def _on_node_port_end(self, scene_pos: QPointF):
+        if not self._temp_line:
+            return
+        self.removeItem(self._temp_line)
+        self._temp_line = None
+        src = self._drag_src_node
+        port = self._drag_src_port
+        self._drag_src_node = None
+        self._drag_src_port = None
+        if not src:
+            return
+
+        # Find target node under cursor
+        target_items = self.items(scene_pos, deviceTransform=self.views()[0].viewportTransform() if self.views() else None)
+        for item in target_items:
+            if isinstance(item, FlowNode) and item is not src:
+                # Create connection
+                self.connect_nodes(src.node_id, item.node_id, port == "success")
+                return
 
     def connect_nodes(self, from_id: str, to_id: str, success: bool = True):
         """Draw an arrow between two nodes."""
@@ -613,6 +721,35 @@ class FlowScene(QGraphicsScene):
         for node in self._nodes.values():
             node._layout_mode = False
 
+    def delete_selected(self):
+        """Remove selected nodes and their connections."""
+        to_remove = [n for n in self._nodes.values() if n.isSelected()]
+        if not to_remove:
+            # Try to remove selected arrows
+            arrow_removed = False
+            for a in list(self._arrows):
+                if a.isSelected():
+                    self.removeItem(a)
+                    self._arrows.remove(a)
+                    arrow_removed = True
+            if not arrow_removed:
+                return
+            self._update_arrows()
+            return
+
+        for node in to_remove:
+            # Remove connected arrows
+            for a in list(self._arrows):
+                if a.source is node or a.target is node:
+                    if a in self._arrows:
+                        self.removeItem(a)
+                        self._arrows.remove(a)
+            # Remove node
+            del self._nodes[node.node_id]
+            self.removeItem(node)
+
+        self._update_arrows()
+
     def get_node(self, node_id: str) -> Optional[FlowNode]:
         return self._nodes.get(node_id)
 
@@ -673,6 +810,110 @@ class FlowView(QGraphicsView):
         self.resetTransform()
         self._zoom = 1.0
         self.fit_all()
+
+
+# ---------------------------------------------------------------------------
+# NodePalettePanel -- left panel with node type buttons
+# ---------------------------------------------------------------------------
+
+NODE_CATEGORIES = [
+    ("鼠标", [
+        ("👆 点击", "click"),
+        ("➤ 移动", "move"),
+        ("↔ 滑动", "swipe"),
+    ]),
+    ("键盘", [
+        ("⌨ 按键", "press"),
+        ("Aa 输入", "type"),
+        ("⌨+ 组合键", "hotkey"),
+    ]),
+    ("等待", [
+        ("🕐 等待", "wait"),
+        ("👁 等到", "wait_until"),
+    ]),
+    ("视觉", [
+        ("🔍 查找", "find"),
+        ("OCR 识字", "find_text"),
+        ("🎨 颜色", "find_color"),
+    ]),
+    ("流程", [
+        (">> 顺序", "sequence"),
+        ("?| 选择", "selector"),
+        ("↻ 重试", "retry"),
+        ("⏱ 超时", "timeout"),
+        ("🔁 循环", "repeat"),
+    ]),
+    ("系统", [
+        ("▶ 命令", "exec"),
+        ("$= 赋值", "set_var"),
+        ("📋 日志", "log"),
+    ]),
+]
+
+
+class NodePalettePanel(QWidget):
+    """Left sidebar panel with draggable node-type buttons."""
+
+    nodeRequested = Signal(str)  # node_type
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedWidth(130)
+        self.setStyleSheet("background:#f5f5f8; border-right:1px solid #e5e7eb;")
+
+        ly = QVBoxLayout(self)
+        ly.setContentsMargins(0, 0, 0, 0)
+        ly.setSpacing(0)
+
+        # Header
+        hdr = QLabel("节点")
+        hdr.setStyleSheet(
+            "font-size:12px; font-weight:600; color:#374151; "
+            "padding:8px 10px; background:#e5e7eb;")
+        ly.addWidget(hdr)
+
+        # Scrollable body
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+
+        body = QWidget()
+        body.setStyleSheet("background:transparent;")
+        body_ly = QVBoxLayout(body)
+        body_ly.setContentsMargins(4, 4, 4, 4)
+        body_ly.setSpacing(2)
+
+        for cat_name, items in NODE_CATEGORIES:
+            # Category header
+            cat_lbl = QLabel(cat_name)
+            cat_lbl.setStyleSheet(
+                "font-size:10px; font-weight:600; color:#9ca3af; "
+                "padding:6px 6px 2px 6px; text-transform:uppercase;")
+            body_ly.addWidget(cat_lbl)
+
+            # Node buttons
+            for label, ntype in items:
+                btn = QPushButton(label)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: white; color: #374151;
+                        border: 1px solid #e5e7eb; border-radius: 3px;
+                        padding: 3px 6px; font-size: 11px; text-align: left;
+                        min-height: 22px;
+                    }
+                    QPushButton:hover {
+                        background: #eff6ff; border-color: #93c5fd;
+                    }
+                """)
+                btn.clicked.connect(lambda checked, t=ntype: self.nodeRequested.emit(t))
+                body_ly.addWidget(btn)
+
+        body_ly.addStretch(1)
+        scroll.setWidget(body)
+        ly.addWidget(scroll, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -862,7 +1103,12 @@ class FlowEditor(QWidget):
         ly.setContentsMargins(0, 0, 0, 0)
         ly.setSpacing(0)
 
-        # Left: toolbar + graph
+        # ═══ Left: node palette ═══
+        self._palette = NodePalettePanel()
+        self._palette.nodeRequested.connect(self._add_node_by_type)
+        ly.addWidget(self._palette)
+
+        # ═══ Center: toolbar + graph ═══
         left_w = QWidget()
         left_ly = QVBoxLayout(left_w)
         left_ly.setContentsMargins(0, 0, 0, 0)
@@ -888,6 +1134,11 @@ class FlowEditor(QWidget):
         opt_btn.setStyleSheet(self._btn_style())
         toolbar.addWidget(opt_btn)
 
+        save_btn = QPushButton("保存")
+        save_btn.clicked.connect(self._save)
+        save_btn.setStyleSheet(self._btn_style().replace("#f3f4f6", "#dbeafe").replace("#374151", "#1d4ed8"))
+        toolbar.addWidget(save_btn)
+
         toolbar.addStretch()
 
         zoom_label = QLabel("100%")
@@ -905,7 +1156,7 @@ class FlowEditor(QWidget):
 
         ly.addWidget(left_w, 1)
 
-        # Right: property editor
+        # ═══ Right: property editor ═══
         self._prop_editor = PropertyEditor()
         self._prop_editor.propertyChanged.connect(self._on_property_changed)
         ly.addWidget(self._prop_editor)
@@ -914,10 +1165,15 @@ class FlowEditor(QWidget):
         self._scene.nodeSelected.connect(self._on_node_selected)
         self._scene.nodeDoubleClicked.connect(self._on_node_double_clicked)
 
+        # Delete key handling
+        self._view.installEventFilter(self)
+        self.setFocusPolicy(Qt.StrongFocus)
+
         self._tasks_data: dict = {}
         self._entry: str = ""
         self._bt_root: dict = None
         self._format: str = "flat"
+        self._current_file: str = ""  # path to saved file
 
     def _btn_style(self):
         return """
@@ -986,7 +1242,143 @@ class FlowEditor(QWidget):
             if node_id in self._tasks_data:
                 self._tasks_data[node_id].update(config)
 
+    def _add_node_by_type(self, node_type: str):
+        """Add a new node of given type to the center of the canvas."""
+        import uuid
+        nid = f"node_{uuid.uuid4().hex[:6]}"
+        name = node_type
+
+        # Default config per type
+        defaults = {
+            "click": {"action": "click", "desc": "点击", "template": "", "threshold": 0.8},
+            "move": {"action": "move", "desc": "移动", "template": "", "threshold": 0.8},
+            "swipe": {"action": "swipe", "desc": "滑动", "from": [0, 0], "to": [100, 100]},
+            "press": {"action": "press", "desc": "按键", "key": ""},
+            "type": {"action": "type", "desc": "输入", "text": ""},
+            "hotkey": {"action": "hotkey", "desc": "组合键", "keys": []},
+            "wait": {"action": "wait", "desc": "等待", "seconds": 1},
+            "wait_until": {"action": "wait_until", "desc": "等到出现", "template": "", "timeout": 30},
+            "find": {"action": "find", "desc": "查找", "template": "", "threshold": 0.8},
+            "find_text": {"action": "find_text", "desc": "识字", "keyword": ""},
+            "find_color": {"action": "find_color", "desc": "颜色检测", "target": [255, 0, 0]},
+            "exec": {"action": "exec", "desc": "执行命令", "cmd": ""},
+            "set_var": {"action": "set_var", "desc": "设置变量", "name": "", "value": ""},
+            "log": {"action": "log", "desc": "日志", "msg": ""},
+            "sequence": {"type": "sequence", "name": "顺序", "children": []},
+            "selector": {"type": "selector", "name": "选择", "children": []},
+            "retry": {"type": "retry", "name": "重试", "count": 3, "child": None},
+            "timeout": {"type": "timeout", "name": "超时", "seconds": 30, "child": None},
+            "repeat": {"type": "repeat", "name": "循环", "child": None},
+        }
+
+        config = defaults.get(node_type, {"action": node_type, "desc": node_type})
+
+        # Place at center of visible area
+        vr = self._view.mapToScene(self._view.viewport().rect()).boundingRect()
+        cx = vr.center().x() - NODE_W / 2
+        cy = vr.center().y() - NODE_H / 2
+
+        node = self._scene.add_node(nid, name, node_type, config, cx, cy)
+
+        # If we're in BT format, update _bt_root
+        if self._format == "bt":
+            # Just mark this as a dangling node
+            self._bt_root = config
+
+    def _save(self):
+        """Save current tree to file."""
+        if not self._current_file:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "提示", "请先在顶部下拉框选择一个任务再保存")
+            return
+
+        # Build BT dict from scene
+        if self._format == "bt" and self._bt_root:
+            bt_dict = {"_meta": {
+                "name": self._bt_root.get("name", ""),
+                "window": "",
+                "retry_on_failure": 0,
+                "global_timeout": 0,
+                "modified": "",
+            }}
+            bt_dict["root"] = self._scene_to_dict()
+        else:
+            bt_dict = {"_meta": {"name": "", "modified": ""}}
+            bt_dict["root"] = self._scene_to_dict()
+
+        # Preserve existing meta if loading from file
+        try:
+            import json as _json
+            with open(self._current_file, encoding="utf-8") as f:
+                old = _json.load(f)
+            old_meta = old.get("_meta", {})
+            bt_dict["_meta"].update({k: v for k, v in old_meta.items()
+                                     if k not in ("modified",)})
+        except Exception:
+            pass
+
+        import datetime, json as _json
+        bt_dict["_meta"]["modified"] = datetime.datetime.now().isoformat()
+
+        with open(self._current_file, "w", encoding="utf-8") as f:
+            _json.dump(bt_dict, f, ensure_ascii=False, indent=2)
+
+        # Emit signal for parent to refresh
+        self.taskEdited.emit(self._current_file, bt_dict)
+        self._bt_root = bt_dict.get("root", {})
+
+    def _scene_to_dict(self) -> dict:
+        """Convert current scene nodes to a BT JSON dict."""
+        nodes = self._scene._nodes
+        if not nodes:
+            return {}
+
+        # Find roots (nodes with no incoming connections)
+        targets = set()
+        for arrow in self._scene._arrows:
+            targets.add(arrow.target.node_id)
+        roots = [n for nid, n in nodes.items() if nid not in targets]
+
+        if not roots:
+            return {}
+
+        def node_to_dict(node: FlowNode) -> dict:
+            d = {"type": node.node_type, "name": node._name}
+            d.update({k: v for k, v in node.config.items()
+                     if k not in ("type", "name", "desc", "action")})
+
+            # Find children via arrows
+            out_arrows = [a for a in self._scene._arrows if a.source.node_id == node.node_id]
+            if out_arrows:
+                children = []
+                for a in out_arrows:
+                    child_dict = node_to_dict(a.target)
+                    children.append(child_dict)
+                if node.node_type in ("sequence", "selector"):
+                    d["children"] = children
+                else:
+                    d["child"] = children[0] if children else None
+            return d
+
+        if len(roots) == 1:
+            return node_to_dict(roots[0])
+        else:
+            return {"type": "sequence", "name": "root",
+                    "children": [node_to_dict(r) for r in roots]}
+
+    def set_current_file(self, path: str):
+        self._current_file = path
+
+    def eventFilter(self, obj, event):
+        """Handle delete key to remove selected nodes."""
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Delete:
+            self._scene.delete_selected()
+            return True
+        return super().eventFilter(obj, event)
+
     def clear(self):
         self._scene.clear_all()
         self._prop_editor.setVisible(False)
         self._tasks_data = {}
+        self._current_file = ""
