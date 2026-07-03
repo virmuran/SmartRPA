@@ -17,7 +17,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsItem,
     QGraphicsRectItem, QGraphicsTextItem, QGraphicsPathItem,
-    QGraphicsEllipseItem, QWidget, QVBoxLayout, QHBoxLayout,
+    QGraphicsEllipseItem, QGraphicsLineItem,
+    QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTextEdit, QComboBox, QSpinBox,
     QDoubleSpinBox, QLineEdit, QFormLayout, QGroupBox,
     QScrollArea, QApplication, QSplitter, QFrame,
@@ -124,6 +125,9 @@ class FlowNode(QGraphicsRectItem):
         # Callbacks (set by FlowScene)
         self._on_dclick = lambda cfg: None
         self._on_select = lambda cfg: None
+
+        # Programmatic move flag (skip snap in layout mode)
+        self._layout_mode = False
 
         # Color based on type
         self._bg = TYPE_COLORS.get(node_type, C_NODE_ACTION)
@@ -237,7 +241,23 @@ class FlowNode(QGraphicsRectItem):
             self._on_select(self.config)
         super().mousePressEvent(event)
 
+    def mouseReleaseEvent(self, event):
+        if self.scene():
+            getattr(self.scene(), '_clear_guides', lambda: None)()
+        super().mouseReleaseEvent(event)
+
     def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self.scene():
+            sc = self.scene()
+            if self._layout_mode or not hasattr(sc, '_show_guides'):
+                return value
+            # Snap to grid: round to nearest 20px
+            new_x = round(value.x() / 20) * 20
+            new_y = round(value.y() / 20) * 20
+            snapped = QPointF(new_x, new_y)
+            sc._show_guides(self, snapped)
+            return snapped
+
         if change == QGraphicsItem.ItemPositionHasChanged:
             # Notify scene to update arrows
             if self.scene():
@@ -355,6 +375,46 @@ class FlowScene(QGraphicsScene):
         self._nodes: Dict[str, FlowNode] = {}
         self._arrows: List[FlowArrow] = []
         self._grid_visible = True
+        self._guide_items: List[QGraphicsLineItem] = []
+
+    def _show_guides(self, moving_node: FlowNode, new_pos: QPointF):
+        """Show alignment guides when dragging a node."""
+        self._clear_guides()
+        mx, my = new_pos.x(), new_pos.y()
+        guide_pen = QPen(QColor("#3b82f6"), 1, Qt.DashLine)
+
+        # Use bounding rect of all nodes as guide extent (not huge magic numbers)
+        all_rect = self.itemsBoundingRect()
+        y0 = all_rect.top() - 100
+        y1 = all_rect.bottom() + 100
+        x0 = all_rect.left() - 100
+        x1 = all_rect.right() + 100
+
+        for node in self._nodes.values():
+            if node is moving_node:
+                continue
+            nx, ny = node.x(), node.y()
+            # Vertical alignment
+            if abs(mx - nx) < 10:
+                line = QGraphicsLineItem(nx, y0, nx, y1)
+                line.setPen(guide_pen)
+                line.setZValue(50)
+                self.addItem(line)
+                self._guide_items.append(line)
+            # Horizontal alignment
+            if abs(my - ny) < 10:
+                line = QGraphicsLineItem(x0, ny, x1, ny)
+                line.setPen(guide_pen)
+                line.setZValue(50)
+                self.addItem(line)
+                self._guide_items.append(line)
+
+    def _clear_guides(self):
+        """Remove all alignment guide lines."""
+        for item in self._guide_items:
+            if item in self.items():
+                self.removeItem(item)
+        self._guide_items.clear()
 
     def set_grid_visible(self, v: bool):
         self._grid_visible = v
@@ -480,53 +540,78 @@ class FlowScene(QGraphicsScene):
         self.setSceneRect(items_rect)
 
     def load_bt_tree(self, root: dict):
-        """Load from a behavior-tree JSON structure.
+        """Load from a behavior-tree JSON structure with smart auto-layout.
 
-        root: {"type": "sequence", "name": "...", "children": [...]}
+        Uses bottom-up width calculation so parent nodes are centered
+        over their children. No overlapping, arrows are straight-ish.
         """
         self.clear_all()
 
-        def add_tree_node(node_dict: dict, parent_id: Optional[str],
-                         x: float, y: float) -> str:
+        # 1. Pre-calculate subtree widths (bottom-up)
+        def subtree_width(node_dict: dict) -> float:
+            children = node_dict.get("children", [])
+            child = node_dict.get("child")
+            if child:
+                children = list(children) + [child]
+            if not children:
+                return NODE_W + H_GAP  # leaf: room for its own width + spacing
+            w = sum(subtree_width(c) for c in children)
+            return w
+
+        # 2. Place nodes top-down using subtree widths
+        def place(node_dict: dict, start_x: float, y: float,
+                  parent_id: Optional[str] = None):
             node_type = node_dict.get("type", "action")
             name = node_dict.get("name", node_type)
             node_id = name or f"node_{len(self._nodes)}"
-            # Ensure unique ID
             base_id = node_id
             counter = 1
             while node_id in self._nodes:
                 node_id = f"{base_id}_{counter}"
                 counter += 1
 
+            # Parent centered in its allocated width
+            w = subtree_width(node_dict)
+            x = start_x + w / 2 - NODE_W / 2
             self.add_node(node_id, name, node_type, node_dict, x, y)
 
             if parent_id:
                 self.connect_nodes(parent_id, node_id, success=True)
 
-            # Handle composite nodes
+            # Children
             children = node_dict.get("children", [])
-            child_node = node_dict.get("child")
-
+            child = node_dict.get("child")
+            if child:
+                children = list(children) + [child]
             if children:
                 child_y = y + NODE_H + V_GAP
-                child_count = len(children)
-                total_w = child_count * (NODE_W + H_GAP) - H_GAP
-                start_x = x - total_w / 2 + NODE_W / 2
-                for i, child in enumerate(children):
-                    cx = start_x + i * (NODE_W + H_GAP)
-                    add_tree_node(child, node_id, cx, child_y)
-
-            if child_node:
-                child_y = y + NODE_H + V_GAP
-                add_tree_node(child_node, node_id, x, child_y)
+                cx = start_x
+                for c in children:
+                    cw = subtree_width(c)
+                    place(c, cx, child_y, node_id)
+                    cx += cw
 
             return node_id
 
-        add_tree_node(root, None, 400, 40)
+        root_width = subtree_width(root)
+        place(root, 0, 40)
 
-        # Auto-fit
+        # Center the view on root (suppress snap while doing layout)
+        for node in self._nodes.values():
+            node._layout_mode = True
+
+        self._clear_guides()  # ensure no stray guides affect bounding rect
         items_rect = self.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self.setSceneRect(items_rect)
+
+        center_x = items_rect.width() / 2 - root_width / 2
+        if center_x > 40:
+            dx = 40 - center_x
+            for node in self._nodes.values():
+                node.setX(node.x() + dx)
+
+        for node in self._nodes.values():
+            node._layout_mode = False
 
     def get_node(self, node_id: str) -> Optional[FlowNode]:
         return self._nodes.get(node_id)
@@ -555,16 +640,30 @@ class FlowView(QGraphicsView):
         self._zoom = 1.0
         self._min_zoom = 0.15
         self._max_zoom = 3.0
+        self._on_zoom = None  # callback(zoom_pct)
 
     def wheelEvent(self, event: QWheelEvent):
         factor = 1.15
         if event.angleDelta().y() < 0:
             factor = 1.0 / factor
 
-        new_zoom = self._zoom * factor
-        if self._min_zoom <= new_zoom <= self._max_zoom:
+        # Read actual zoom from view transform (not cached _zoom)
+        current = self.transform().m11()
+        new_zoom = current * factor
+
+        # Clamp to allowed range
+        if new_zoom < self._min_zoom:
+            factor = self._min_zoom / current
+            new_zoom = self._min_zoom
+        elif new_zoom > self._max_zoom:
+            factor = self._max_zoom / current
+            new_zoom = self._max_zoom
+
+        if abs(factor - 1.0) > 0.001:
             self._zoom = new_zoom
             self.scale(factor, factor)
+            if self._on_zoom:
+                self._on_zoom(int(new_zoom * 100))
 
     def fit_all(self):
         self.fitInView(self._scene.sceneRect(), Qt.KeepAspectRatio)
@@ -784,6 +883,11 @@ class FlowEditor(QWidget):
         reset_btn.setStyleSheet(self._btn_style())
         toolbar.addWidget(reset_btn)
 
+        opt_btn = QPushButton("优化布局")
+        opt_btn.clicked.connect(self._optimize_layout)
+        opt_btn.setStyleSheet(self._btn_style())
+        toolbar.addWidget(opt_btn)
+
         toolbar.addStretch()
 
         zoom_label = QLabel("100%")
@@ -796,7 +900,7 @@ class FlowEditor(QWidget):
         # Flow view
         self._scene = FlowScene()
         self._view = FlowView(self._scene)
-        self._view.wheelEvent = self._make_wheel_event(self._view.wheelEvent)
+        self._view._on_zoom = lambda z: self._zoom_label.setText(f"{z}%")
         left_ly.addWidget(self._view, 1)
 
         ly.addWidget(left_w, 1)
@@ -812,6 +916,8 @@ class FlowEditor(QWidget):
 
         self._tasks_data: dict = {}
         self._entry: str = ""
+        self._bt_root: dict = None
+        self._format: str = "flat"
 
     def _btn_style(self):
         return """
@@ -820,21 +926,19 @@ class FlowEditor(QWidget):
             QPushButton:hover { background:#e5e7eb; }
         """
 
-    def _make_wheel_event(self, orig):
-        def wrapper(event):
-            orig(event)
-            z = int(self._view._zoom * 100)
-            self._zoom_label.setText(f"{z}%")
-        return wrapper
-
     def _fit_view(self):
         self._view.fit_all()
+        z = int(self._view._zoom * 100)
+        self._zoom_label.setText(f"{z}%")
 
     def _reset_view(self):
         self._view.reset_view()
+        z = int(self._view._zoom * 100)
+        self._zoom_label.setText(f"{z}%")
 
     def load_flat_tasks(self, tasks: dict, entry: str):
         """Load from flat task format {TaskA: {action, next, ...}, ...}"""
+        self._format = "flat"
         self._tasks_data = tasks
         self._entry = entry
         self._scene.auto_layout(tasks, entry)
@@ -842,8 +946,20 @@ class FlowEditor(QWidget):
 
     def load_bt_tree(self, root: dict):
         """Load from behavior tree JSON."""
+        self._format = "bt"
+        self._bt_root = root
+        self._tasks_data = {}
         self._scene.load_bt_tree(root)
         self._view.fit_all()
+
+    def _optimize_layout(self):
+        """Re-run auto-layout on current nodes (after user manual adjustments)."""
+        if self._format == "bt" and self._bt_root:
+            self._scene.load_bt_tree(self._bt_root)
+            self._view.fit_all()
+        elif self._format == "flat" and self._tasks_data:
+            self._scene.auto_layout(self._tasks_data, self._entry)
+            self._view.fit_all()
 
     def _on_node_selected(self, config: dict):
         pass  # Selection-only, no property display
