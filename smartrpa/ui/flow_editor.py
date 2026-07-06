@@ -13,7 +13,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QPainter, QPen, QBrush, QColor, QFont, QPainterPath,
-    QPolygonF, QWheelEvent, QMouseEvent,
+    QPolygonF, QWheelEvent, QMouseEvent, QPixmap,
 )
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsItem,
@@ -1288,34 +1288,20 @@ class PropertyEditor(QWidget):
             "font-size:13px; font-weight:600; color:#374151;")
         title_ly.addWidget(self._title, 1)
 
-        # Close button — hides the entire panel (one button, that's it)
-        close_btn = QPushButton()
-        close_btn.setFixedSize(18, 18)
+        # Collapse button — hides the panel (same style as toolbar buttons)
+        close_btn = QPushButton("收起")
+        close_btn.setFixedSize(52, 28)
         close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setToolTip("关闭")
+        close_btn.setToolTip("收起面板")
         close_btn.setStyleSheet("""
             QPushButton {
-                background: transparent; border: none;
-                color: #9ca3af; border-radius: 9px;
-                qproperty-icon: url(close_icon);
+                background: #3b82f6; color: white; border: none;
+                border-radius: 4px; padding: 0 12px;
+                font-weight: 600; font-size: 12px;
             }
-            QPushButton:hover {
-                background: #f3f4f6; color: #374151;
-            }
+            QPushButton:hover { background: #2563eb; }
         """)
-        # Draw × using unicode
-        close_btn.setText("\u2715")
-        close_btn.setStyleSheet("""
-            QPushButton {
-                font-size: 11px; font-weight: normal;
-                color: #9ca3af; background: transparent;
-                border: none; border-radius: 9px;
-            }
-            QPushButton:hover {
-                color: #ef4444; background: #fef2f2;
-            }
-        """)
-        close_btn.clicked.connect(self.hide)  # just hide the panel, simple
+        close_btn.clicked.connect(self.hide)
         title_ly.addWidget(close_btn)
 
         ly.addWidget(title_row)
