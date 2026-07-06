@@ -1,15 +1,13 @@
 {
     "_meta": {
-        "name": "贴吧签到 (BT)",
+        "name": "贴吧签到",
         "window": "*百度贴吧*",
         "retry_on_failure": 3,
         "global_timeout": 600
     },
-    "_comment": "Behavior Tree version. Key improvements over old format:",
-    "_comment2": "  - Task-level retry: whole workflow restarts 3 times on any failure",
-    "_comment3": "  - Global timeout: 10 min cap prevents infinite hangs",
-    "_comment4": "  - Selector nodes provide explicit fallback paths",
-    "_comment5": "  - Repeat node elegantly handles the signin loop",
+    "_comment": "Behavior Tree 贴吧签到任务",
+    "_comment2": "特性: 版本自动检测(新旧版路由) / 循环签到每个吧 / 一键签到弹窗处理",
+    "_comment3": "全局超时 10 分钟，整个流程失败自动重试 3 次",
 
     "root": {
         "type": "timeout",
@@ -24,21 +22,29 @@
 
                 {
                     "type": "selector",
-                    "name": "等待页面并切换旧版",
+                    "name": "版本检测与路由",
                     "children": [
                         {
                             "type": "sequence",
-                            "name": "正常流程",
+                            "name": "路径A: 已在旧版",
                             "children": [
-                                { "type": "wait_until", "name": "等待首页加载", "template": "switch_old_btn", "threshold": 0.75, "timeout": 30, "interval": 0.5 },
-                                { "type": "click", "name": "切换到旧版", "template": "switch_old_btn", "threshold": 0.75, "multi_scale": true, "retry": {"count": 2, "interval": 1.0} }
+                                { "type": "wait_until", "name": "等页面加载", "template": "onekey_signin", "threshold": 0.75, "timeout": 15, "interval": 0.5 },
+                                { "type": "find", "name": "检查是不是旧版", "template": "onekey_signin", "threshold": 0.75 },
+                                { "type": "log", "name": "旧版确认", "msg": "当前已是旧版界面，直接签到" }
                             ]
                         },
-                        { "type": "log", "name": "已在旧版，跳过", "msg": "旧版切换跳过（可能已在旧版）" }
+                        {
+                            "type": "sequence",
+                            "name": "路径B: 新版转旧版",
+                            "children": [
+                                { "type": "wait_until", "name": "等页面加载", "template": "switch_old_btn", "threshold": 0.75, "timeout": 15, "interval": 0.5 },
+                                { "type": "find", "name": "确认是新版", "template": "switch_old_btn", "threshold": 0.75 },
+                                { "type": "click", "name": "切换到旧版", "template": "switch_old_btn", "threshold": 0.75, "multi_scale": true, "retry": {"count": 2, "interval": 1.0} },
+                                { "type": "wait_until", "name": "等待旧版加载", "template": "onekey_signin", "threshold": 0.75, "timeout": 15, "interval": 0.5 }
+                            ]
+                        }
                     ]
                 },
-
-                { "type": "wait_until", "name": "等待旧版加载", "template": "onekey_signin", "threshold": 0.75, "timeout": 20, "interval": 0.5 },
                 { "type": "click", "name": "一键签到 (7级以上)", "template": "onekey_signin", "threshold": 0.75, "multi_scale": true, "retry": {"count": 2, "interval": 1.0} },
 
                 {

@@ -857,17 +857,9 @@ class ActionRecorder(QThread):
             gap = ts - prev_time
             prev_time = ts
 
-            # Add wait for gaps > 2 seconds
-            if gap > 2.0 and step_num > 0:
-                step_num += 1
-                sid = f"Step{step_num}"
-                tasks[sid] = {
-                    "desc": f"等待{gap:.1f}秒",
-                    "action": "wait",
-                    "params": {"seconds": round(gap, 1)}
-                }
-                if step_num > 1:
-                    tasks[f"Step{step_num-1}"]["next"] = [sid]
+            # Note: gaps > 2s are intentionally not auto-inserted as steps.
+            # Users should use wait_until (visual detection) in the flow editor
+            # for robust timing instead of fixed delays.
 
             step_num += 1
             sid = f"Step{step_num}"
@@ -1813,7 +1805,7 @@ class SmartRPAGUI(QMainWindow):
 
         mid_ly.addWidget(section_title("操作"))
         op_row = QHBoxLayout(); op_row.setSpacing(T.SP_SM)
-        for label, act in [("+ 点击","click"), ("+ 按键","press"), ("+ 等待","wait"), ("+ 等到","wait_until")]:
+        for label, act in [("+ 点击","click"), ("+ 按键","press"), ("+ 等到","wait_until")]:
             b = btn_ghost(label); b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda checked, a=act: self._ed_add(a))
             op_row.addWidget(b)
@@ -2126,12 +2118,6 @@ class SmartRPAGUI(QMainWindow):
                     self._ed.append((k.strip(), 0, 0, 0, 0, "press"))
                     self._ed_refresh()
                 return
-            if action == "wait":
-                s, ok = QInputDialog.getDouble(self, "等待", "秒:", 2.0, 0.1, 60, 1)
-                if ok:
-                    self._ed.append((f"{s:.1f}秒", 0, 0, 0, 0, "wait"))
-                    self._ed_refresh()
-                return
             if action == "wait_until":
                 self.showMinimized()
                 d = RegionSelector()
@@ -2177,13 +2163,11 @@ class SmartRPAGUI(QMainWindow):
     def _ed_refresh(self):
         self.ed_list.blockSignals(True)
         self.ed_list.clear()
-        cm = {"click": "点", "press": "按键", "wait": "等待", "wait_until": "等到"}
+        cm = {"click": "点", "press": "按键", "wait_until": "等到"}
         for i, s in enumerate(self._ed):
             n, _, _, _, _, a = s
             c = cm.get(a, a)
-            if a == "wait":
-                text = f"  [{i+1}] 等待 {n}"
-            elif a == "press":
+            if a == "press":
                 text = f"  [{i+1}] 按 {n}"
             else:
                 text = f"  [{i+1}] {c} {n}"
@@ -2264,10 +2248,7 @@ class SmartRPAGUI(QMainWindow):
                 tpl, x, y, w, h, a = s
                 sid = f"Step{i+1}"
                 e = {"desc": f"步骤{i+1}"}
-                if a == "wait":
-                    e["action"] = "wait"
-                    e["params"] = {"seconds": float(tpl.replace("秒", ""))}
-                elif a == "press":
+                if a == "press":
                     e["action"] = "press"
                     e["params"] = {"key": tpl}
                 elif a == "wait_until":
@@ -2362,8 +2343,6 @@ class SmartRPAGUI(QMainWindow):
                 self._ed.append((tpl, 0, 0, 0, 0, "click"))
             elif action == "press":
                 self._ed.append((params.get("key", ""), 0, 0, 0, 0, "press"))
-            elif action == "wait":
-                self._ed.append((f"{params.get('seconds', 1)}秒", 0, 0, 0, 0, "wait"))
             elif action == "wait_until":
                 self._ed.append((tpl, 0, 0, 0, 0, "wait_until"))
             else:
@@ -2903,12 +2882,6 @@ class SmartRPAGUI(QMainWindow):
             new_tpl, ok = QInputDialog.getText(self, "修改模板", "模板名:", text=s[0])
             if ok and new_tpl.strip():
                 s[0] = new_tpl.strip()
-                self._ed[row] = tuple(s)
-                self._ed_refresh()
-        elif a == "wait":
-            new_s, ok = QInputDialog.getDouble(self, "修改等待", "秒:", float(s[0].replace("秒","")), 0.1, 60, 1)
-            if ok:
-                s[0] = f"{new_s:.1f}秒"
                 self._ed[row] = tuple(s)
                 self._ed_refresh()
         elif a == "press":
