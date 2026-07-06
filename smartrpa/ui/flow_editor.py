@@ -1267,8 +1267,6 @@ class PropertyEditor(QWidget):
         self._current_config: dict = {}
         self._template_dir: str = ""  # set by FlowEditor
         self._help_expanded = True  # inner help card toggle
-        self._panel_collapsed = False  # outer panel collapse (dock style)
-        self._normal_width = 320  # remember width before collapse
 
         main_ly = QVBoxLayout(self)
         main_ly.setContentsMargins(0, 0, 0, 0)
@@ -1280,46 +1278,46 @@ class PropertyEditor(QWidget):
         ly.setContentsMargins(0, 0, 0, 0)
         ly.setSpacing(0)
 
-        # ── Title row with window controls ──
+        # ── Title row with close button ──
         title_row = QWidget()
         title_ly = QHBoxLayout(title_row)
-        title_ly.setContentsMargins(10, 6, 8, 6)
+        title_ly.setContentsMargins(10, 6, 6, 6)
 
         self._title = QLabel("属性")
         self._title.setStyleSheet(
             "font-size:13px; font-weight:600; color:#374151;")
         title_ly.addWidget(self._title, 1)
 
-        # Panel control dots (clean, minimal — WorkBuddy style)
-        ctrl_container = QWidget()
-        ctrl_container.setFixedWidth(44)
-        ctrl_ly = QHBoxLayout(ctrl_container)
-        ctrl_ly.setContentsMargins(0, 0, 0, 0)
-        ctrl_ly.setSpacing(6)
-
-        # Collapse dot (minimize to strip)
-        self._collapse_dot = QPushButton()
-        self._collapse_dot.setFixedSize(12, 12)
-        self._collapse_dot.setCursor(Qt.PointingHandCursor)
-        self._collapse_dot.setToolTip("收起面板")
-        self._collapse_dot.setStyleSheet("""
+        # Close button — hides the entire panel (one button, that's it)
+        close_btn = QPushButton()
+        close_btn.setFixedSize(18, 18)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setToolTip("关闭")
+        close_btn.setStyleSheet("""
             QPushButton {
-                background: #f59e0b; border: none; border-radius: 6px;
+                background: transparent; border: none;
+                color: #9ca3af; border-radius: 9px;
+                qproperty-icon: url(close_icon);
             }
-            QPushButton:hover { background: #d97706; }
+            QPushButton:hover {
+                background: #f3f4f6; color: #374151;
+            }
         """)
-        self._collapse_dot.clicked.connect(self._collapse_panel)
-        ctrl_ly.addWidget(self._collapse_dot)
+        # Draw × using unicode
+        close_btn.setText("\u2715")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 11px; font-weight: normal;
+                color: #9ca3af; background: transparent;
+                border: none; border-radius: 9px;
+            }
+            QPushButton:hover {
+                color: #ef4444; background: #fef2f2;
+            }
+        """)
+        close_btn.clicked.connect(self.hide)  # just hide the panel, simple
+        title_ly.addWidget(close_btn)
 
-        # Decorative dot (no function, just visual balance)
-        deco_dot = QPushButton()
-        deco_dot.setFixedSize(12, 12)
-        deco_dot.setEnabled(False)
-        deco_dot.setStyleSheet(
-            "QPushButton{background:#34d399;border:none;border-radius:6px;}")
-        ctrl_ly.addWidget(deco_dot)
-
-        title_ly.addWidget(ctrl_container)
         ly.addWidget(title_row)
 
         # ── Help card container (collapsible inner area) ──
@@ -1357,60 +1355,6 @@ class PropertyEditor(QWidget):
         ly.addWidget(self._apply_btn)
 
         main_ly.addWidget(self._content)
-
-        # ═══ Collapsed strip (narrow bar with clean expand affordance) ═══
-        self._collapsed_strip = QWidget()
-        self._collapsed_strip.setVisible(False)
-        self._collapsed_strip.setFixedWidth(40)
-        self._collapsed_strip.setStyleSheet(
-            "QWidget{background:#f9fafb; border-left:1px solid #e5e7eb;}")
-        strip_ly = QVBoxLayout(self._collapsed_strip)
-        strip_ly.setContentsMargins(6, 12, 6, 12)
-        strip_ly.setSpacing(0)
-
-        # Clean expand button — just an arrow, like a dock panel tab
-        expand_big = QPushButton("◀")
-        expand_big.setFixedSize(28, 28)
-        expand_big.setCursor(Qt.PointingHandCursor)
-        expand_big.setToolTip("展开属性面板")
-        expand_big.setStyleSheet("""
-            QPushButton {
-                background:transparent; border:none;
-                font-size:14px; color:#9ca3af; border-radius:6px;
-            }
-            QPushButton:hover {
-                background:#f3f4f6; color:#374151;
-            }
-        """)
-        expand_big.clicked.connect(self._expand_panel)
-
-        strip_ly.addStretch()
-        strip_ly.addWidget(expand_big, 0, Qt.AlignHCenter)
-        strip_ly.addStretch()
-
-        main_ly.addWidget(self._collapsed_strip)
-
-    def _collapse_panel(self):
-        """Shrink the panel to a visible narrow strip."""
-        if self._panel_collapsed:
-            return
-        self._panel_collapsed = True
-        self._normal_width = self.width() or 320
-        self._content.setVisible(False)
-        self._collapsed_strip.setVisible(True)
-        self.setFixedWidth(40)
-        self.setMinimumWidth(40)
-        self.setMaximumWidth(40)
-
-    def _expand_panel(self):
-        """Restore the panel from narrow strip to full size."""
-        if not self._panel_collapsed:
-            return
-        self._panel_collapsed = False
-        self._collapsed_strip.setVisible(False)
-        self._content.setVisible(True)
-        self.setMinimumWidth(280)
-        self.setMaximumWidth(400)
 
         self.setVisible(False)
 
