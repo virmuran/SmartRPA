@@ -1,6 +1,7 @@
 """SmartRPA GUI — 视觉驱动的智能桌面自动化程序"""
 #
 import sys, os, json, datetime, time
+from typing import List
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -43,7 +44,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon, QMenu, QDateTimeEdit,
     QMessageBox,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QRect, QTimer, QSettings, Slot
+from PySide6.QtCore import Qt, QThread, Signal, QRect, QTimer, QSettings, Slot, QSize
 from PySide6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QIcon, QPixmap, QDesktopServices
 from PySide6.QtCore import QUrl
 
@@ -1499,18 +1500,25 @@ class SmartRPAGUI(QMainWindow):
         h_split.setHandleWidth(1)
         h_split.setStyleSheet(f"QSplitter::handle{{background:{T.LINE};}}")
 
-        # LEFT: vertical split (task list above, config below)
-        left_split = QSplitter(Qt.Vertical)
-        left_split.setHandleWidth(1)
-        left_split.setStyleSheet(f"QSplitter::handle{{background:{T.LINE};}}")
+        # LEFT: MAA-style task panel
+        left_w = QWidget()
+        left_w.setStyleSheet(f"background:{T.BG};")
+        left_ly = QVBoxLayout(left_w)
+        left_ly.setContentsMargins(0, 0, 0, 0)
+        left_ly.setSpacing(T.SP_LG)
 
-        # LEFT TOP: Task list
+        # Task checklist panel
         task_panel = QWidget()
         task_panel.setStyleSheet(f"background:{T.CARD}; border:none; border-radius:{T.R_LG}px;")
         task_layout = QVBoxLayout(task_panel)
         task_layout.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
         task_layout.setSpacing(T.SP_MD)
-        task_layout.addWidget(section_title("任务"))
+
+        task_header = QHBoxLayout()
+        task_header.addWidget(section_title("任务"))
+        task_header.addStretch()
+        task_layout.addLayout(task_header)
+
         self.task_list = QListWidget()
         self.task_list.setFont(QFont("Microsoft YaHei", 10))
         self.task_list.setStyleSheet(f"""
@@ -1524,8 +1532,9 @@ class SmartRPAGUI(QMainWindow):
                 outline: none;
             }}
             QListWidget::item {{
-                padding: 6px 10px;
+                padding: 0px;
                 border-radius: 4px;
+                min-height: 32px;
             }}
             QListWidget::item:selected {{
                 background: {T.ACCENT_DIM};
@@ -1535,50 +1544,28 @@ class SmartRPAGUI(QMainWindow):
                 background: {T.CARD_HOVER};
             }}
         """)
-        self.task_list.currentRowChanged.connect(self._on_task_list_selected)
         task_layout.addWidget(self.task_list, 1)
-        left_split.addWidget(task_panel)
-        # RIGHT: Log Panel (full height)
-        self._log_card = QWidget()
-        self._log_card.setStyleSheet(f"""
-            background: {T.CARD};
-            border: none;
-            border-radius: {T.R_LG}px;
-        """)
-        Rl = QVBoxLayout(self._log_card)
-        Rl.setContentsMargins(T.SP_LG, T.SP_XL, T.SP_LG, T.SP_LG)
-        Rl.setSpacing(T.SP_MD)
-        log_header = QHBoxLayout()
-        log_header.setSpacing(T.SP_SM)
-        log_header.addWidget(section_header("日志"))
-        log_header.addStretch()
-        copy_btn = btn_ghost("复制")
-        copy_btn.setToolTip("复制日志到剪贴板")
-        copy_btn.clicked.connect(self._copy_log)
-        log_header.addWidget(copy_btn)
-        Rl.addLayout(log_header)
-        self.log = QTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setStyleSheet(f"""
-            background: {T.LOG_BG};
-            color: {T.LOG_TEXT};
-            border: 1px solid {T.LINE};
-            border-radius: {T.R_MD}px;
-            padding: 14px;
-            font-size: 12px;
-            selection-background-color: {T.ACCENT_DIM};
-        """)
-        self.log.setFont(QFont("Cascadia Code,Consolas,monospace", 10))
-        self.log.document().setMaximumBlockCount(2000)
-        Rl.addWidget(self.log, 1)
-        clr_log_row = QHBoxLayout()
-        clr_log_row.setSpacing(T.SP_SM)
-        clr_log_btn = btn_ghost("清空日志")
-        clr_log_btn.clicked.connect(self._clear_log)
-        clr_log_row.addWidget(clr_log_btn)
-        clr_log_row.addStretch()
-        Rl.addLayout(clr_log_row)
-        # Lower: Config Panel
+
+        # Bulk action buttons
+        bulk_row = QHBoxLayout()
+        bulk_row.setSpacing(T.SP_SM)
+        select_all_btn = btn_ghost("全选")
+        select_all_btn.clicked.connect(self._select_all_tasks)
+        bulk_row.addWidget(select_all_btn)
+
+        invert_btn = btn_ghost("反选")
+        invert_btn.clicked.connect(self._invert_task_selection)
+        bulk_row.addWidget(invert_btn)
+
+        clear_sel_btn = btn_ghost("清空")
+        clear_sel_btn.clicked.connect(self._clear_task_checks)
+        bulk_row.addWidget(clear_sel_btn)
+        bulk_row.addStretch()
+        task_layout.addLayout(bulk_row)
+
+        left_ly.addWidget(task_panel, 1)
+
+        # Config card
         self._config_card = QWidget()
         self._config_card.setStyleSheet(f"""
             background: {T.CARD};
@@ -1588,6 +1575,7 @@ class SmartRPAGUI(QMainWindow):
         Cl = QVBoxLayout(self._config_card)
         Cl.setContentsMargins(T.SP_XL, T.SP_XL, T.SP_XL, T.SP_XL)
         Cl.setSpacing(T.SP_LG)
+
         # Hidden combo for logic (synced with task_list)
         self.task_combo = QComboBox()
         self.task_combo.setStyleSheet(f"""
@@ -1634,33 +1622,27 @@ class SmartRPAGUI(QMainWindow):
         browse_btn.clicked.connect(self._browse_tpl)
         tpb.addWidget(browse_btn)
         Cl.addLayout(tpb)
-        Cl.addWidget(section_title("操作区域"))
-        rb = QHBoxLayout()
-        rb.setSpacing(T.SP_SM)
+
+        # Compact row: 操作区域 + 重复 + 速度
+        compact_row = QHBoxLayout()
+        compact_row.setSpacing(T.SP_SM)
         self.region_lbl = status_pill("全屏")
-        rb.addWidget(self.region_lbl, 1)
+        compact_row.addWidget(self.region_lbl, 1)
         region_btn = btn_ghost("框选")
-        region_btn.setFixedWidth(64)
+        region_btn.setFixedWidth(48)
         region_btn.clicked.connect(self._select_region)
-        rb.addWidget(region_btn)
-        Cl.addLayout(rb)
-        Cl.addWidget(section_title("重复"))
-        lr = QHBoxLayout()
-        lr.setSpacing(T.SP_SM)
+        compact_row.addWidget(region_btn)
+        compact_row.addSpacing(T.SP_MD)
         self.run_loop = QSpinBox()
         self.run_loop.setRange(1, 9999)
         self.run_loop.setValue(1)
-        self.run_loop.setFixedWidth(80)
+        self.run_loop.setFixedWidth(64)
         self.run_loop.setStyleSheet(f"QSpinBox{{background:{T.CARD};color:{T.TEXT};border:1px solid {T.LINE};border-radius:{T.R_SM}px;padding:5px 14px;min-height:26px;max-height:26px;font-weight:600;font-size:12px;}}QSpinBox::up-button,QSpinBox::down-button{{border:none;width:20px;background:transparent;}}QSpinBox:hover{{border:1px solid {T.LINE_LIGHT};}}")
-        lr.addWidget(self.run_loop)
+        compact_row.addWidget(self.run_loop)
         tl = QLabel("次")
         tl.setStyleSheet(f"font-size:13px;font-weight:500;color:{T.TEXT2};")
-        lr.addWidget(tl)
-        lr.addStretch()
-        Cl.addLayout(lr)
-        Cl.addWidget(section_title("速度"))
-        speed_row = QHBoxLayout()
-        speed_row.setSpacing(T.SP_SM)
+        compact_row.addWidget(tl)
+        compact_row.addSpacing(T.SP_MD)
         self.fast_toggle = QPushButton("⚡ 极速")
         self.fast_toggle.setCheckable(True)
         self.fast_toggle.setCursor(Qt.PointingHandCursor)
@@ -1668,181 +1650,166 @@ class SmartRPAGUI(QMainWindow):
         self.fast_toggle.setMaximumHeight(26)
         self.fast_toggle.toggled.connect(self._on_speed_toggle)
         self._update_speed_btn_style(False)
-        speed_row.addWidget(self.fast_toggle)
-        speed_row.addStretch()
-        Cl.addLayout(speed_row)
+        compact_row.addWidget(self.fast_toggle)
+        compact_row.addStretch()
+        Cl.addLayout(compact_row)
         Cl.addStretch(1)
+
         self.run_btn = QPushButton("▶  开始运行")
         self.run_btn.setCursor(Qt.PointingHandCursor)
-        self.run_btn.setMinimumHeight(26)
-        self.run_btn.setMaximumHeight(26)
+        self.run_btn.setMinimumHeight(36)
+        self.run_btn.setMaximumHeight(36)
         self.run_btn.clicked.connect(self._toggle_run)
         Cl.addWidget(self.run_btn)
         self._update_run_btn_style()
 
-        left_split.addWidget(self._config_card)
-        left_split.setSizes([300, 250])
+        left_ly.addWidget(self._config_card)
+        h_split.addWidget(left_w)
 
-        # Queue panel
-        self._queue_card = QWidget()
-        self._queue_card.setStyleSheet(f"""
+        # RIGHT: Log Panel (full height)
+        self._log_card = QWidget()
+        self._log_card.setStyleSheet(f"""
             background: {T.CARD};
             border: none;
             border-radius: {T.R_LG}px;
         """)
-        Ql = QVBoxLayout(self._queue_card)
-        Ql.setContentsMargins(T.SP_LG, T.SP_XL, T.SP_LG, T.SP_LG)
-        Ql.setSpacing(T.SP_MD)
-
-        q_header = QHBoxLayout()
-        q_header.setSpacing(T.SP_SM)
-        q_header.addWidget(section_title("任务队列"))
-        q_header.addStretch()
-
-        add_queue_btn = btn_ghost("+ 添加")
-        add_queue_btn.setToolTip("将当前选中任务加入队列")
-        add_queue_btn.clicked.connect(self._add_to_queue)
-        q_header.addWidget(add_queue_btn)
-
-        clear_queue_btn = btn_ghost("清空")
-        clear_queue_btn.clicked.connect(self._clear_queue)
-        q_header.addWidget(clear_queue_btn)
-
-        Ql.addLayout(q_header)
-
-        self._queue_list = QListWidget()
-        self._queue_list.setFont(QFont("Microsoft YaHei", 9))
-        self._queue_list.setStyleSheet(f"""
-            QListWidget {{
-                background: {T.SURFACE};
-                color: {T.TEXT};
-                border: 1px solid {T.LINE};
-                border-radius: {T.R_MD}px;
-                padding: 4px;
-                font-size: 11px;
-                outline: none;
-            }}
-            QListWidget::item {{
-                padding: 4px 8px;
-                border-radius: 3px;
-                border-bottom: 1px solid {T.LINE};
-            }}
-            QListWidget::item:selected {{
-                background: {T.ACCENT_DIM};
-                color: {T.TEXT};
-            }}
+        Rl = QVBoxLayout(self._log_card)
+        Rl.setContentsMargins(T.SP_LG, T.SP_XL, T.SP_LG, T.SP_LG)
+        Rl.setSpacing(T.SP_MD)
+        log_header = QHBoxLayout()
+        log_header.setSpacing(T.SP_SM)
+        log_header.addWidget(section_header("日志"))
+        log_header.addStretch()
+        copy_btn = btn_ghost("复制")
+        copy_btn.setToolTip("复制日志到剪贴板")
+        copy_btn.clicked.connect(self._copy_log)
+        log_header.addWidget(copy_btn)
+        Rl.addLayout(log_header)
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setStyleSheet(f"""
+            background: {T.LOG_BG};
+            color: {T.LOG_TEXT};
+            border: 1px solid {T.LINE};
+            border-radius: {T.R_MD}px;
+            padding: 14px;
+            font-size: 12px;
+            selection-background-color: {T.ACCENT_DIM};
         """)
-        self._queue_list.setMaximumHeight(120)
-        Ql.addWidget(self._queue_list, 1)
+        self.log.setFont(QFont("Cascadia Code,Consolas,monospace", 10))
+        self.log.document().setMaximumBlockCount(2000)
+        Rl.addWidget(self.log, 1)
+        clr_log_row = QHBoxLayout()
+        clr_log_row.setSpacing(T.SP_SM)
+        clr_log_btn = btn_ghost("清空日志")
+        clr_log_btn.clicked.connect(self._clear_log)
+        clr_log_row.addWidget(clr_log_btn)
+        clr_log_row.addStretch()
+        Rl.addLayout(clr_log_row)
 
-        run_queue_btn = QPushButton("▶  执行队列")
-        run_queue_btn.setCursor(Qt.PointingHandCursor)
-        run_queue_btn.setMinimumHeight(26)
-        run_queue_btn.setMaximumHeight(26)
-        run_queue_btn.clicked.connect(self._run_queue)
-        run_queue_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {T.ACCENT};
-                color: white;
-                border: none;
-                border-radius: {T.R_SM}px;
-                font-weight: 600;
-                font-size: 12px;
-                padding: 5px 0;
-            }}
-            QPushButton:hover {{ background: {T.ACCENT2}; }}
-        """)
-        Ql.addWidget(run_queue_btn)
-
-        left_split.addWidget(self._queue_card)
-        left_split.setSizes([250, 220, 150])
-        h_split.addWidget(left_split)
         h_split.addWidget(self._log_card)
-        h_split.setSizes([400, 500])
+        h_split.setSizes([460, 560])
         ly.addWidget(h_split, 1)
         return page
     def _on_task_list_selected(self, idx):
-        """左列任务列表选中时同步更新隐藏的任务下拉框并触发配置加载."""
+        """Clicking a task row selects it for configuration (without toggling checkbox)."""
         if idx < 0:
             return
         item = self.task_list.item(idx)
         if not item:
             return
-        task_name = item.text()
+        task_name = item.data(Qt.UserRole)
         combo_idx = self.task_combo.findText(task_name)
         if combo_idx >= 0:
             self.task_combo.setCurrentIndex(combo_idx)
 
-    def _add_to_queue(self):
-        """Add the currently selected task to the queue."""
-        task_name = self.task_combo.currentText()
-        path = self._task_map.get(task_name)
-        if not path:
-            self.log_msg("未选择有效任务，无法加入队列", "WARN")
-            return
+    def _add_task_checklist_item(self, name: str, checked: bool = True):
+        """Add a MAA-style checklist row: checkbox + name + settings gear."""
+        item = QListWidgetItem()
+        item.setData(Qt.UserRole, name)
+        item.setSizeHint(QSize(self.task_list.width() - 20, 34))
+        self.task_list.addItem(item)
 
-        item = QListWidgetItem(f"{self._queue_list.count() + 1}. {task_name}")
-        item.setData(Qt.UserRole, path)
-        self._queue_list.addItem(item)
-        self.log_msg(f"已加入队列: {task_name}", "INFO")
+        row_w = QWidget()
+        row_ly = QHBoxLayout(row_w)
+        row_ly.setContentsMargins(8, 2, 8, 2)
+        row_ly.setSpacing(8)
 
-    def _clear_queue(self):
-        """Clear all tasks from the queue."""
-        self._queue_list.clear()
-        self.log_msg("队列已清空", "INFO")
+        cb = QCheckBox()
+        cb.setChecked(checked)
+        cb.stateChanged.connect(lambda state, it=item: it.setData(Qt.UserRole + 1, state == Qt.Checked))
+        row_ly.addWidget(cb)
 
-    def _run_queue(self):
-        """Start executing the queue from the first task."""
-        if self._running:
-            self.log_msg("已有任务在运行中", "WARN")
-            return
-        if self._queue_list.count() == 0:
-            self.log_msg("队列为空", "WARN")
-            return
+        lbl = QLabel(name)
+        lbl.setStyleSheet(f"font-size:12px; color:{T.TEXT};")
+        lbl.setWordWrap(False)
+        row_ly.addWidget(lbl, 1)
 
-        self.log_msg(f"开始执行队列 ({self._queue_list.count()} 个任务)", "INFO")
-        self._queue_index = 0
-        self._run_next_in_queue()
+        gear = QPushButton("⚙")
+        gear.setFixedSize(24, 24)
+        gear.setCursor(Qt.PointingHandCursor)
+        gear.setToolTip("配置此任务")
+        gear.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: none;
+                color: {T.TEXT2}; font-size: 12px;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{ background: {T.SURFACE}; color: {T.ACCENT}; }}
+        """)
+        gear.clicked.connect(lambda checked, n=name: self._configure_task(n))
+        row_ly.addWidget(gear)
 
-    def _run_next_in_queue(self):
-        """Run the next task in the queue."""
-        if not hasattr(self, '_queue_index'):
-            self._queue_index = 0
+        self.task_list.setItemWidget(item, row_w)
+        # Store initial check state
+        item.setData(Qt.UserRole + 1, checked)
 
-        if self._queue_index >= self._queue_list.count():
-            self.log_msg("队列全部执行完成", "SUCCESS")
-            return
+    def _configure_task(self, name: str):
+        """Select a task in the combo so the global config applies to it."""
+        combo_idx = self.task_combo.findText(name)
+        if combo_idx >= 0:
+            self.task_combo.setCurrentIndex(combo_idx)
+        # Also select in list
+        for i in range(self.task_list.count()):
+            if self.task_list.item(i).data(Qt.UserRole) == name:
+                self.task_list.setCurrentRow(i)
+                break
+        self.log_msg(f"已选择任务进行配置: {name}", "INFO")
 
-        item = self._queue_list.item(self._queue_index)
-        path = item.data(Qt.UserRole)
-        task_name = item.text()
+    def _checked_task_names(self) -> List[str]:
+        """Return list of currently checked task display names."""
+        names = []
+        for i in range(self.task_list.count()):
+            item = self.task_list.item(i)
+            if item.data(Qt.UserRole + 1):
+                names.append(item.data(Qt.UserRole))
+        return names
 
-        self.log_msg(f"--- 队列 [{self._queue_index + 1}/{self._queue_list.count()}] {task_name} ---", "INFO")
-        self._running = True
-        self.run_btn.setText("\u25A0  停止")
-        self._update_run_btn_style()
-        self.progress.show()
-        self.state_lbl.setStyleSheet(f"color:{T.ACCENT2};font-size:11px;padding:0 4px;")
-        self.state_lbl.setText("队列运行中")
+    def _select_all_tasks(self):
+        """Check all tasks."""
+        self._set_all_tasks_checked(True)
 
-        self.worker = TaskWorker(
-            path, self.tpl_combo.currentText() or None,
-            not self.popup_cb.isChecked(), self._region,
-            self.fast_toggle.isChecked()
-        )
-        self.worker.log.connect(self.log_msg)
-        self.worker.finished.connect(self._queue_done)
-        self.showMinimized()
-        self.worker.start()
+    def _clear_task_checks(self):
+        """Uncheck all tasks."""
+        self._set_all_tasks_checked(False)
 
-    def _queue_done(self, stats):
-        """Called when a task in the queue finishes."""
-        self.showNormal()
-        msg = f"[队列] 完成: {stats['steps']}步 {stats['errors']}错误"
-        self.log_msg(msg, "SUCCESS" if stats['errors'] == 0 else "WARN")
+    def _invert_task_selection(self):
+        """Invert check state of all tasks."""
+        for i in range(self.task_list.count()):
+            item = self.task_list.item(i)
+            widget = self.task_list.itemWidget(item)
+            if widget:
+                cb = widget.layout().itemAt(0).widget()
+                cb.setChecked(not cb.isChecked())
 
-        self._queue_index += 1
-        self._run_next_in_queue()
+    def _set_all_tasks_checked(self, checked: bool):
+        """Set all task checkboxes to the given state."""
+        for i in range(self.task_list.count()):
+            item = self.task_list.item(i)
+            widget = self.task_list.itemWidget(item)
+            if widget:
+                cb = widget.layout().itemAt(0).widget()
+                cb.setChecked(checked)
 
     def _toggle_run(self):
         if self._running:
@@ -2672,11 +2639,11 @@ class SmartRPAGUI(QMainWindow):
                     self._task_map[bt_key] = bt_file
                     self.task_combo.addItem(bt_key)
 
-        # Refresh tasks page list
+        # Refresh tasks page list (MAA-style checklist)
         if hasattr(self, 'task_list'):
             self.task_list.clear()
             for name in self._task_map:
-                self.task_list.addItem(name)
+                self._add_task_checklist_item(name)
             if self.task_list.count() > 0:
                 self.task_list.setCurrentRow(0)
 
@@ -2733,18 +2700,51 @@ class SmartRPAGUI(QMainWindow):
             self.tpl_combo.setCurrentText(d)
 
     def _start(self):
-        path = self._task_map.get(self.task_combo.currentText())
-        if not path or not os.path.exists(path):
-            self.log_msg("未选择有效任务", "ERROR")
+        """Start running all checked tasks sequentially."""
+        checked = self._checked_task_names()
+        if not checked:
+            self.log_msg("没有勾选任何任务", "WARN")
             return
+
+        self._checked_names = checked
+        self._queue_index = 0
+        self._loop_count = 0
+        self._max_loops = self.run_loop.value()
+        self.log_msg(f"准备运行 {len(checked)} 个任务，循环 {self._max_loops} 次", "INFO")
+        self._run_next_checked()
+
+    def _run_next_checked(self):
+        """Run the next checked task in sequence."""
+        if self._queue_index >= len(self._checked_names):
+            # All tasks done for this loop iteration
+            self._loop_count += 1
+            if self._loop_count < self._max_loops:
+                self._queue_index = 0
+                self.log_msg(f"--- 第 {self._loop_count + 1}/{self._max_loops} 轮 ---", "INFO")
+            else:
+                self._finish_run()
+                return
+
+        if self._queue_index >= len(self._checked_names):
+            self._finish_run()
+            return
+
+        name = self._checked_names[self._queue_index]
+        path = self._task_map.get(name)
+        if not path or not os.path.exists(path):
+            self.log_msg(f"任务文件不存在: {name}", "ERROR")
+            self._queue_index += 1
+            self._run_next_checked()
+            return
+
         self._running = True
         self.run_btn.setText("\u25A0  停止")
         self._update_run_btn_style()
         self.progress.show()
-
         self.state_lbl.setStyleSheet(f"color:{T.ACCENT2};font-size:11px;padding:0 4px;")
-        self.state_lbl.setText("运行中")
+        self.state_lbl.setText(f"运行中 [{self._queue_index + 1}/{len(self._checked_names)}]")
 
+        self.log_msg(f"[{self._queue_index + 1}/{len(self._checked_names)}] {name}", "INFO")
 
         self.worker = TaskWorker(
             path, self.tpl_combo.currentText() or None,
@@ -2755,6 +2755,12 @@ class SmartRPAGUI(QMainWindow):
         self.worker.finished.connect(self._done)
         self.showMinimized()
         self.worker.start()
+
+    def _finish_run(self):
+        """All checked tasks completed across all loops."""
+        self.showNormal()
+        self._reset()
+        self.log_msg("所有任务执行完成", "SUCCESS")
 
     def _on_step(self, desc):
         self.status_lbl.setText(f" {desc}")
@@ -2768,9 +2774,8 @@ class SmartRPAGUI(QMainWindow):
 
     def _done(self, stats):
         self.showNormal()
-        self._reset()
         msg = f"完成: {stats['steps']}步 {stats['popups_handled']}弹窗 {stats['errors']}错误"
-        self.log_msg(msg, "SUCCESS")
+        self.log_msg(msg, "SUCCESS" if stats['errors'] == 0 else "WARN")
         self.status_lbl.setText(f" 完成 — {stats['steps']}步骤")
         # 错误通知
         if stats['errors'] > 0:
@@ -2785,6 +2790,10 @@ class SmartRPAGUI(QMainWindow):
                 f"{stats['steps']}步 全部成功",
                 QSystemTrayIcon.MessageIcon.Information, 3000
             )
+
+        # Continue to next checked task
+        self._queue_index += 1
+        self._run_next_checked()
 
     def _reset(self):
         self._running = False
