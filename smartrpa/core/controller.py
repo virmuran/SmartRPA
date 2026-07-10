@@ -25,12 +25,16 @@ class Monitor:
 
 
 class Controller:
-    """统一设备控制接口"""
+    """统一设备控制接口。支持截图缓存避免重复截屏。"""
 
     def __init__(self):
         self._sct = mss.mss()
         self._human = None  # 延迟初始化
         self._monitors: List[Monitor] = self._detect_monitors()
+
+        # Screenshot cache
+        self._cache_ss: Optional[np.ndarray] = None
+        self._cache_valid: bool = False
 
     def _detect_monitors(self) -> List[Monitor]:
         """使用 screeninfo 检测所有显示器布局"""
@@ -59,29 +63,40 @@ class Controller:
 
     # ========== 截图 ==========
 
-    def screenshot(self, region: Tuple[int, int, int, int] = None) -> np.ndarray:
+    def screenshot(self, region: Tuple[int, int, int, int] = None, use_cache: bool = True) -> np.ndarray:
         """
-        截取屏幕区域
+        截取屏幕区域（支持缓存避免重复截屏）。
 
         Args:
             region: (x, y, w, h)，None=全虚拟桌面（所有显示器拼接）
+            use_cache: 是否使用缓存。通常为True，只有需要强制刷新时设为False。
 
         Returns:
             BGR格式numpy数组
         """
+        if use_cache and not region and self._cache_valid and self._cache_ss is not None:
+            return self._cache_ss
+
         if region:
             x, y, w, h = region
             monitor = {"left": x, "top": y, "width": w, "height": h}
         else:
-            # mss monitors[0] = 全虚拟桌面（所有显示器拼接）
-            # 使用 monitors[0] 确保无论用户在哪块屏幕上操作都能截到
             monitor = self._sct.monitors[0]
 
         img = self._sct.grab(monitor)
         result = np.array(img)
         if result.shape[2] == 4:
-            result = result[:, :, :3]  # BGRA → BGR
+            result = result[:, :, :3]
+
+        if not region:
+            self._cache_ss = result.copy()
+            self._cache_valid = True
+
         return result
+
+    def invalidate_cache(self):
+        """使截图缓存失效（在执行点击/按键等修改屏幕状态的操作后调用）。"""
+        self._cache_valid = False
 
     @property
     def screen_size(self) -> Tuple[int, int]:
@@ -107,6 +122,7 @@ class Controller:
         else:
             import pydirectinput
             pydirectinput.click(x, y)
+        self.invalidate_cache()
 
     def move_to(self, x: int, y: int):
         """移动鼠标"""
@@ -115,20 +131,24 @@ class Controller:
     def drag(self, x1: int, y1: int, x2: int, y2: int):
         """拖拽"""
         self.human.drag(x1, y1, x2, y2)
+        self.invalidate_cache()
 
     def scroll(self, direction: str = "down", amount: int = 300):
         """鼠标滚轮滚动"""
         self.human.scroll(direction, amount)
+        self.invalidate_cache()
 
     # ========== 键盘操作 ==========
 
     def press_key(self, key: str):
         """按下按键"""
         self.human.press_key(key)
+        self.invalidate_cache()
 
     def type_text(self, text: str):
         """输入文本"""
         self.human.type_text(text)
+        self.invalidate_cache()
 
     # ========== 便捷方法 ==========
 

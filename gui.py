@@ -1682,6 +1682,80 @@ class SmartRPAGUI(QMainWindow):
 
         left_split.addWidget(self._config_card)
         left_split.setSizes([300, 250])
+
+        # Queue panel
+        self._queue_card = QWidget()
+        self._queue_card.setStyleSheet(f"""
+            background: {T.CARD};
+            border: none;
+            border-radius: {T.R_LG}px;
+        """)
+        Ql = QVBoxLayout(self._queue_card)
+        Ql.setContentsMargins(T.SP_LG, T.SP_XL, T.SP_LG, T.SP_LG)
+        Ql.setSpacing(T.SP_MD)
+
+        q_header = QHBoxLayout()
+        q_header.setSpacing(T.SP_SM)
+        q_header.addWidget(section_title("任务队列"))
+        q_header.addStretch()
+
+        add_queue_btn = btn_ghost("+ 添加")
+        add_queue_btn.setToolTip("将当前选中任务加入队列")
+        add_queue_btn.clicked.connect(self._add_to_queue)
+        q_header.addWidget(add_queue_btn)
+
+        clear_queue_btn = btn_ghost("清空")
+        clear_queue_btn.clicked.connect(self._clear_queue)
+        q_header.addWidget(clear_queue_btn)
+
+        Ql.addLayout(q_header)
+
+        self._queue_list = QListWidget()
+        self._queue_list.setFont(QFont("Microsoft YaHei", 9))
+        self._queue_list.setStyleSheet(f"""
+            QListWidget {{
+                background: {T.SURFACE};
+                color: {T.TEXT};
+                border: 1px solid {T.LINE};
+                border-radius: {T.R_MD}px;
+                padding: 4px;
+                font-size: 11px;
+                outline: none;
+            }}
+            QListWidget::item {{
+                padding: 4px 8px;
+                border-radius: 3px;
+                border-bottom: 1px solid {T.LINE};
+            }}
+            QListWidget::item:selected {{
+                background: {T.ACCENT_DIM};
+                color: {T.TEXT};
+            }}
+        """)
+        self._queue_list.setMaximumHeight(120)
+        Ql.addWidget(self._queue_list, 1)
+
+        run_queue_btn = QPushButton("▶  执行队列")
+        run_queue_btn.setCursor(Qt.PointingHandCursor)
+        run_queue_btn.setMinimumHeight(26)
+        run_queue_btn.setMaximumHeight(26)
+        run_queue_btn.clicked.connect(self._run_queue)
+        run_queue_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {T.ACCENT};
+                color: white;
+                border: none;
+                border-radius: {T.R_SM}px;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 5px 0;
+            }}
+            QPushButton:hover {{ background: {T.ACCENT2}; }}
+        """)
+        Ql.addWidget(run_queue_btn)
+
+        left_split.addWidget(self._queue_card)
+        left_split.setSizes([250, 220, 150])
         h_split.addWidget(left_split)
         h_split.addWidget(self._log_card)
         h_split.setSizes([400, 500])
@@ -1698,6 +1772,77 @@ class SmartRPAGUI(QMainWindow):
         combo_idx = self.task_combo.findText(task_name)
         if combo_idx >= 0:
             self.task_combo.setCurrentIndex(combo_idx)
+
+    def _add_to_queue(self):
+        """Add the currently selected task to the queue."""
+        task_name = self.task_combo.currentText()
+        path = self._task_map.get(task_name)
+        if not path:
+            self.log_msg("未选择有效任务，无法加入队列", "WARN")
+            return
+
+        item = QListWidgetItem(f"{self._queue_list.count() + 1}. {task_name}")
+        item.setData(Qt.UserRole, path)
+        self._queue_list.addItem(item)
+        self.log_msg(f"已加入队列: {task_name}", "INFO")
+
+    def _clear_queue(self):
+        """Clear all tasks from the queue."""
+        self._queue_list.clear()
+        self.log_msg("队列已清空", "INFO")
+
+    def _run_queue(self):
+        """Start executing the queue from the first task."""
+        if self._running:
+            self.log_msg("已有任务在运行中", "WARN")
+            return
+        if self._queue_list.count() == 0:
+            self.log_msg("队列为空", "WARN")
+            return
+
+        self.log_msg(f"开始执行队列 ({self._queue_list.count()} 个任务)", "INFO")
+        self._queue_index = 0
+        self._run_next_in_queue()
+
+    def _run_next_in_queue(self):
+        """Run the next task in the queue."""
+        if not hasattr(self, '_queue_index'):
+            self._queue_index = 0
+
+        if self._queue_index >= self._queue_list.count():
+            self.log_msg("队列全部执行完成", "SUCCESS")
+            return
+
+        item = self._queue_list.item(self._queue_index)
+        path = item.data(Qt.UserRole)
+        task_name = item.text()
+
+        self.log_msg(f"--- 队列 [{self._queue_index + 1}/{self._queue_list.count()}] {task_name} ---", "INFO")
+        self._running = True
+        self.run_btn.setText("\u25A0  停止")
+        self._update_run_btn_style()
+        self.progress.show()
+        self.state_lbl.setStyleSheet(f"color:{T.ACCENT2};font-size:11px;padding:0 4px;")
+        self.state_lbl.setText("队列运行中")
+
+        self.worker = TaskWorker(
+            path, self.tpl_combo.currentText() or None,
+            not self.popup_cb.isChecked(), self._region,
+            self.fast_toggle.isChecked()
+        )
+        self.worker.log.connect(self.log_msg)
+        self.worker.finished.connect(self._queue_done)
+        self.showMinimized()
+        self.worker.start()
+
+    def _queue_done(self, stats):
+        """Called when a task in the queue finishes."""
+        self.showNormal()
+        msg = f"[队列] 完成: {stats['steps']}步 {stats['errors']}错误"
+        self.log_msg(msg, "SUCCESS" if stats['errors'] == 0 else "WARN")
+
+        self._queue_index += 1
+        self._run_next_in_queue()
 
     def _toggle_run(self):
         if self._running:

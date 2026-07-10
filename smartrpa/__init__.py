@@ -6,6 +6,6 @@ from .core.behavior_tree import BTEngine
 from .core.popup import PopupHandler
 from .core.human import HumanLike
 
-__version__ = "0.7.5"
+__version__ = "0.7.6"
 __all__ = ['Controller', 'Vision', 'Found', 'TaskEngine', 'BTEngine',
            'PopupHandler', 'HumanLike']

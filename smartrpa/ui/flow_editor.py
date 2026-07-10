@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QTextEdit, QComboBox, QSpinBox,
     QDoubleSpinBox, QLineEdit, QFormLayout, QGroupBox,
     QScrollArea, QApplication, QSplitter, QFrame,
+    QDialog, QListWidget, QListWidgetItem, QMenu,
 )
 
 
@@ -633,6 +634,13 @@ class FlowScene(QGraphicsScene):
         self._undo_batching = False
         self._undo_group: list = []
 
+        # Node groups: {group_id: {name, node_ids: [str], collapsed: bool}}
+        self._groups: Dict[str, dict] = {}
+        # Active group rect items (for rendering): {group_id: QGraphicsRectItem}
+        self._group_items: Dict[str, QGraphicsRectItem] = {}
+        # Context menu action
+        self._context_menu = None
+
     def _show_guides(self, moving_node: FlowNode, new_pos: QPointF):
         """Show alignment guides when dragging a node."""
         self._clear_guides()
@@ -791,18 +799,22 @@ class FlowScene(QGraphicsScene):
             self._arrows.append(arrow)
 
     def clear_all(self):
-        """Remove all nodes and arrows."""
+        """Remove all nodes, arrows, and groups."""
         for a in self._arrows:
             self.removeItem(a)
         self._arrows.clear()
         for n in list(self._nodes.values()):
             self.removeItem(n)
         self._nodes.clear()
+        for gid in list(self._groups.keys()):
+            self._remove_group_render(gid)
+        self._groups.clear()
 
     def _update_arrows(self):
-        """Refresh all arrow paths (called after node moves)."""
+        """Refresh all arrow paths and group renders (called after node moves)."""
         for arrow in self._arrows:
             arrow.update_path()
+        self.update_all_groups()
 
     def auto_layout(self, tasks: dict, entry: str):
         """Auto-layout from flat task dict.
@@ -991,6 +1003,122 @@ class FlowScene(QGraphicsScene):
     def get_node(self, node_id: str) -> Optional[FlowNode]:
         return self._nodes.get(node_id)
 
+    # ── Node Grouping ──
+
+    def group_selected(self, name: str = ""):
+        """Create a group from currently selected nodes."""
+        selected = [n for n in self._nodes.values() if n.isSelected()]
+        if len(selected) < 2:
+            return
+
+        import uuid
+        gid = f"group_{uuid.uuid4().hex[:6]}"
+        if not name:
+            name = f"分组 {len(self._groups) + 1}"
+
+        node_ids = [n.node_id for n in selected]
+        self._groups[gid] = {"name": name, "node_ids": node_ids, "collapsed": False}
+        self._render_group(gid)
+
+        # Undo support
+        def undo():
+            self._remove_group_render(gid)
+            self._groups.pop(gid, None)
+        def redo():
+            self._groups[gid] = {"name": name, "node_ids": node_ids, "collapsed": False}
+            self._render_group(gid)
+        self._push_undo(undo, redo)
+
+    def _render_group(self, gid: str):
+        """Render group bounding rect behind grouped nodes."""
+        if gid not in self._groups:
+            return
+        g = self._groups[gid]
+        node_ids = g["node_ids"]
+        nodes = [self._nodes[nid] for nid in node_ids if nid in self._nodes]
+        if not nodes:
+            return
+
+        # Compute bounding rect with padding
+        pad = 28
+        xs = [n.pos().x() for n in nodes]
+        ys = [n.pos().y() for n in nodes]
+        left = min(xs) - pad
+        top = min(ys) - pad
+        right = max(xs) + NODE_W + pad
+        bottom = max(ys) + NODE_H + pad
+
+        # Remove old render if exists
+        self._remove_group_render(gid)
+
+        # Background rect
+        rect_item = QGraphicsRectItem(left, top, right - left, bottom - top)
+        rect_item.setBrush(QColor(245, 245, 250, 80))
+        rect_item.setPen(QPen(QColor("#d1d5db"), 1, Qt.DashLine))
+        rect_item.setZValue(0)  # Behind nodes
+        rect_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.addItem(rect_item)
+
+        # Title label
+        title = QGraphicsTextItem(g["name"])
+        title.setPos(left + 8, top + 4)
+        title.setDefaultTextColor(QColor("#6b7280"))
+        title.setFont(QFont("Microsoft YaHei", 9))
+        title.setZValue(1)
+        self.addItem(title)
+
+        # Collapse toggle hint
+        hint = QGraphicsTextItem("(右键切换折叠)")
+        hint.setPos(left + 8, top + 18)
+        hint.setDefaultTextColor(QColor("#9ca3af"))
+        hint.setFont(QFont("Microsoft YaHei", 7))
+        hint.setZValue(1)
+        self.addItem(hint)
+
+        self._group_items[gid] = (rect_item, title, hint)
+
+    def _remove_group_render(self, gid: str):
+        """Remove group rendering items."""
+        if gid in self._group_items:
+            for item in self._group_items[gid]:
+                self.removeItem(item)
+            del self._group_items[gid]
+
+    def _update_group_render(self, gid: str):
+        """Update group rendering (e.g. after node move)."""
+        self._remove_group_render(gid)
+        self._render_group(gid)
+
+    def update_all_groups(self):
+        """Refresh all group renders after node moves."""
+        for gid in list(self._groups.keys()):
+            self._update_group_render(gid)
+
+    def toggle_group_collapse(self, gid: str):
+        """Toggle collapse/expand for a group."""
+        if gid not in self._groups:
+            return
+        g = self._groups[gid]
+        g["collapsed"] = not g["collapsed"]
+
+        for nid in g["node_ids"]:
+            node = self._nodes.get(nid)
+            if node:
+                node.setVisible(not g["collapsed"])
+
+        # Hide arrows between collapsed nodes
+        if g["collapsed"]:
+            gidset = set(g["node_ids"])
+            for arrow in self._arrows:
+                if arrow.source.node_id in gidset and arrow.target.node_id in gidset:
+                    arrow.setVisible(False)
+
+    def ungroup(self, gid: str):
+        """Remove a group without deleting nodes."""
+        self.toggle_group_collapse(gid)  # ensure expanded
+        self._remove_group_render(gid)
+        self._groups.pop(gid, None)
+
     # ── Undo/Redo ──
 
     def _push_undo(self, undo_action, redo_action):
@@ -1135,6 +1263,34 @@ class FlowView(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
 
+    def contextMenuEvent(self, event):
+        """Right-click context menu for node grouping."""
+        menu = QMenu(self)
+
+        # Count selected nodes
+        selected = [n for n in self._scene._nodes.values() if n.isSelected()]
+        if len(selected) >= 2:
+            group_act = menu.addAction("创建分组")
+            group_act.triggered.connect(lambda: self._scene.group_selected())
+
+        # Check if clicked near a group
+        scene_pos = self.mapToScene(event.pos())
+        for gid, items in list(self._scene._group_items.items()):
+            rect, title, hint = items
+            if rect.contains(scene_pos):
+                g = self._scene._groups[gid]
+                if g["collapsed"]:
+                    collapse_act = menu.addAction("展开分组")
+                else:
+                    collapse_act = menu.addAction("折叠分组")
+                collapse_act.triggered.connect(lambda checked, g=gid: self._scene.toggle_group_collapse(g))
+                ungroup_act = menu.addAction("取消分组")
+                ungroup_act.triggered.connect(lambda checked, g=gid: self._scene.ungroup(g))
+                break
+
+        if not menu.isEmpty():
+            menu.exec(event.globalPos())
+
     def fit_all(self):
         self.fitInView(self._scene.sceneRect(), Qt.KeepAspectRatio)
         self._zoom = self.transform().m11()
@@ -1184,13 +1340,13 @@ NODE_CATEGORIES = [
 
 
 class NodePalettePanel(QWidget):
-    """Left sidebar panel with draggable node-type buttons."""
+    """Left sidebar panel with searchable node-type buttons."""
 
     nodeRequested = Signal(str)  # node_type
 
     def __init__(self):
         super().__init__()
-        self.setFixedWidth(130)
+        self.setFixedWidth(140)
         self.setStyleSheet("background:#f5f5f8; border-right:1px solid #e5e7eb;")
 
         ly = QVBoxLayout(self)
@@ -1204,6 +1360,20 @@ class NodePalettePanel(QWidget):
             "padding:8px 10px; background:#e5e7eb;")
         ly.addWidget(hdr)
 
+        # Search bar
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("搜索节点... (Ctrl+F)")
+        self._search.setStyleSheet("""
+            QLineEdit {
+                border: 1px solid #d1d5db; border-radius: 3px;
+                padding: 4px 8px; font-size: 11px; margin: 4px 6px;
+                background: white; min-height: 22px;
+            }
+            QLineEdit:focus { border-color: #3b82f6; }
+        """)
+        self._search.textChanged.connect(self._filter)
+        ly.addWidget(self._search)
+
         # Scrollable body
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -1211,11 +1381,14 @@ class NodePalettePanel(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
 
-        body = QWidget()
-        body.setStyleSheet("background:transparent;")
-        body_ly = QVBoxLayout(body)
-        body_ly.setContentsMargins(4, 4, 4, 4)
-        body_ly.setSpacing(2)
+        self._body = QWidget()
+        self._body.setStyleSheet("background:transparent;")
+        self._body_ly = QVBoxLayout(self._body)
+        self._body_ly.setContentsMargins(4, 4, 4, 4)
+        self._body_ly.setSpacing(2)
+
+        self._cat_labels = []  # (category_name, QLabel)
+        self._node_btns = []   # (ntype, label_text, QPushButton)
 
         for cat_name, items in NODE_CATEGORIES:
             # Category header
@@ -1223,7 +1396,8 @@ class NodePalettePanel(QWidget):
             cat_lbl.setStyleSheet(
                 "font-size:10px; font-weight:600; color:#9ca3af; "
                 "padding:6px 6px 2px 6px; text-transform:uppercase;")
-            body_ly.addWidget(cat_lbl)
+            self._body_ly.addWidget(cat_lbl)
+            self._cat_labels.append((cat_name, cat_lbl))
 
             # Node buttons
             for label, ntype in items:
@@ -1241,11 +1415,53 @@ class NodePalettePanel(QWidget):
                     }
                 """)
                 btn.clicked.connect(lambda checked, t=ntype: self.nodeRequested.emit(t))
-                body_ly.addWidget(btn)
+                self._body_ly.addWidget(btn)
+                self._node_btns.append((ntype, label, btn))
 
-        body_ly.addStretch(1)
-        scroll.setWidget(body)
+        self._body_ly.addStretch(1)
+        scroll.setWidget(self._body)
         ly.addWidget(scroll, 1)
+
+    def _filter(self, text: str):
+        """Show only nodes matching the search text (name, type, or category)."""
+        q = text.strip().lower()
+        if not q:
+            # Show all
+            for _, lbl in self._cat_labels:
+                lbl.setVisible(True)
+            for _, _, btn in self._node_btns:
+                btn.setVisible(True)
+            return
+
+        # Group buttons by category
+        all_cats = []
+        for cat_name, items in NODE_CATEGORIES:
+            cats = {}
+            for label, ntype in items:
+                cats[ntype] = label
+            all_cats.append((cat_name, cats))
+
+        for i, (cat_name, cats) in enumerate(all_cats):
+            visible = False
+            cat_match = q in cat_name.lower()
+            if cat_match:
+                visible = True
+            # Show/hide category label
+            self._cat_labels[i][1].setVisible(cat_match)
+
+            for ntype, label, btn in self._node_btns:
+                if ntype in cats:
+                    if q and (q in label.lower() or q in ntype.lower() or cat_match):
+                        btn.setVisible(True)
+                        if not cat_match:
+                            self._cat_labels[i][1].setVisible(True)
+                    else:
+                        btn.setVisible(False)
+
+    def focus_search(self):
+        """Focus the search input (called via Ctrl+F shortcut)."""
+        self._search.setFocus()
+        self._search.selectAll()
 
 
 # ---------------------------------------------------------------------------
@@ -1812,6 +2028,169 @@ class PropertyEditor(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# TaskTemplateGallery -- browse and import workflow templates
+# ---------------------------------------------------------------------------
+
+class TaskTemplateGallery(QDialog):
+    """Dialog showing available task templates from examples/ directory."""
+
+    templateSelected = Signal(str, dict)  # filename, parsed task data
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("工作流模板库")
+        self.setMinimumSize(520, 400)
+        self.setStyleSheet("background:#ffffff;")
+
+        ly = QVBoxLayout(self)
+        ly.setContentsMargins(16, 12, 16, 12)
+        ly.setSpacing(10)
+
+        # Title
+        title = QLabel("模板库")
+        title.setStyleSheet("font-size:16px; font-weight:600; color:#1f2937;")
+        ly.addWidget(title)
+
+        desc = QLabel("选择一个模板，一键导入到流程编辑器")
+        desc.setStyleSheet("font-size:12px; color:#6b7280;")
+        ly.addWidget(desc)
+
+        # Template list
+        self._list = QListWidget()
+        self._list.setStyleSheet("""
+            QListWidget { border: 1px solid #e5e7eb; border-radius: 8px;
+                background: #fafbfc; font-size: 12px; }
+            QListWidget::item { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }
+            QListWidget::item:hover { background: #eff6ff; }
+            QListWidget::item:selected { background: #dbeafe; color: #1e40af; }
+        """)
+        self._list.itemDoubleClicked.connect(self._import_selected)
+        ly.addWidget(self._list, 1)
+
+        # Preview area
+        self._preview = QLabel("")
+        self._preview.setStyleSheet(
+            "font-size:11px; color:#6b7280; padding:8px; "
+            "background:#f9fafb; border-radius:6px; min-height:40px;")
+        self._preview.setWordWrap(True)
+        self._preview.setVisible(False)
+        ly.addWidget(self._preview)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setStyleSheet("""
+            QPushButton { background: #f3f4f6; color: #374151;
+                border: 1px solid #d1d5db; border-radius: 6px;
+                padding: 6px 20px; font-size: 12px; }
+            QPushButton:hover { background: #e5e7eb; }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        btn_row.addStretch()
+
+        import_btn = QPushButton("导入选中模板")
+        import_btn.setStyleSheet("""
+            QPushButton { background: #3b82f6; color: white; border: none;
+                border-radius: 6px; padding: 6px 20px; font-size: 12px;
+                font-weight: 600; }
+            QPushButton:hover { background: #2563eb; }
+        """)
+        import_btn.clicked.connect(self._import_selected)
+        btn_row.addWidget(import_btn)
+
+        ly.addLayout(btn_row)
+
+        self._templates = []  # (path, meta_name, meta_desc, node_count)
+        self._scan_templates()
+
+    def _scan_templates(self):
+        """Scan examples/ directory for task templates."""
+        import json as _json
+        import glob as _glob
+
+        # Look for task files in examples/ directory
+        examples_base = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "examples")
+
+        if not os.path.isdir(examples_base):
+            # Try relative to current working directory
+            examples_base = "examples"
+
+        patterns = [
+            os.path.join(examples_base, "**", "task*.json"),
+            os.path.join(examples_base, "**", "task.json"),
+        ]
+
+        found = set()
+        for pat in patterns:
+            for p in _glob.glob(pat, recursive=True):
+                found.add(p)
+
+        for p in sorted(found):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    data = _json.load(f)
+            except Exception:
+                continue
+
+            meta = data.get("_meta", {})
+            name = meta.get("name", os.path.basename(os.path.dirname(p)))
+            description = meta.get("description", meta.get("window", ""))
+            root = data.get("root", data)
+            node_count = self._count_nodes(root)
+
+            item_text = f"{name}  ({node_count} 个节点)"
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.UserRole, p)
+            self._list.addItem(item)
+
+            self._templates.append((p, name, description, node_count, data))
+
+        self._list.itemClicked.connect(self._show_preview)
+
+        if self._list.count() == 0:
+            item = QListWidgetItem("(未找到模板 — 在 examples/ 下放入任务 JSON 文件)")
+            item.setFlags(Qt.NoItemFlags)
+            self._list.addItem(item)
+
+    def _count_nodes(self, node: dict) -> int:
+        """Count total nodes in a BT tree."""
+        if not isinstance(node, dict):
+            return 0
+        count = 1
+        for child in node.get("children", []):
+            count += self._count_nodes(child)
+        child = node.get("child")
+        if isinstance(child, dict):
+            count += self._count_nodes(child)
+        return count
+
+    def _show_preview(self, item: QListWidgetItem):
+        idx = self._list.row(item)
+        if 0 <= idx < len(self._templates):
+            _, name, desc, count, _ = self._templates[idx]
+            self._preview.setText(
+                f"名称: {name}\n描述: {desc or '(无)'}\n节点数: {count}")
+            self._preview.setVisible(True)
+
+    def _import_selected(self):
+        """Import the selected template into the flow editor."""
+        sel = self._list.currentItem()
+        if not sel:
+            return
+        idx = self._list.row(sel)
+        if 0 <= idx < len(self._templates):
+            path, _, _, _, data = self._templates[idx]
+            self.templateSelected.emit(path, data)
+            self.accept()
+
+
+# ---------------------------------------------------------------------------
 # FlowEditor -- the complete editor widget
 # ---------------------------------------------------------------------------
 
@@ -1878,6 +2257,11 @@ class FlowEditor(QWidget):
         save_btn.clicked.connect(self._save)
         save_btn.setStyleSheet(self._btn_style().replace("#f3f4f6", "#dbeafe").replace("#374151", "#1d4ed8"))
         toolbar.addWidget(save_btn)
+
+        tpl_btn = QPushButton("模板库")
+        tpl_btn.clicked.connect(self._open_template_gallery)
+        tpl_btn.setStyleSheet(self._btn_style())
+        toolbar.addWidget(tpl_btn)
 
         toolbar.addStretch()
 
@@ -2113,8 +2497,29 @@ class FlowEditor(QWidget):
         if os.path.isdir(tpl_dir):
             self._prop_editor._template_dir = tpl_dir
 
+    def _open_template_gallery(self):
+        """Open the template gallery dialog for one-click import."""
+        gallery = TaskTemplateGallery(self)
+        gallery.templateSelected.connect(self._import_template)
+        gallery.exec()
+
+    def _import_template(self, path: str, data: dict):
+        """Import a template into the flow editor."""
+        root = data.get("root", data)
+        meta = data.get("_meta", {})
+        self._format = "bt"
+        self._bt_root = root
+        self._scene.clear_all()
+        self._scene.load_bt_tree(root)
+        self._tasks_data = {}
+        # Set name from meta for save
+        if meta.get("name"):
+            self._bt_root = {"name": meta["name"], **root} if isinstance(root, dict) else root
+
+        self._view.fit_all()
+
     def eventFilter(self, obj, event):
-        """Handle delete key and Ctrl+Z/Y shortcuts."""
+        """Handle delete key and Ctrl+Z/Y/S/F shortcuts."""
         from PySide6.QtCore import QEvent
         if event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Delete:
@@ -2125,6 +2530,12 @@ class FlowEditor(QWidget):
                 return True
             if event.key() == Qt.Key_Y and event.modifiers() == Qt.ControlModifier:
                 self._redo()
+                return True
+            if event.key() == Qt.Key_S and event.modifiers() == Qt.ControlModifier:
+                self._save()
+                return True
+            if event.key() == Qt.Key_F and event.modifiers() == Qt.ControlModifier:
+                self._palette.focus_search()
                 return True
         return super().eventFilter(obj, event)
 
