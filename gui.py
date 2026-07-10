@@ -879,7 +879,7 @@ class ActionRecorder(QThread):
                     )
                 # Use lower threshold + multi-scale for recorded templates
                 tasks[sid] = {
-                    "desc": f"点击({x},{y})",
+                    "desc": f"点击 {tpl_name}.png",
                     "action": "click",
                     "params": {"template": tpl_name, "threshold": 0.7,
                                "multi_scale": True}

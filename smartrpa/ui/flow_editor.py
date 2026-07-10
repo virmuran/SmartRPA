@@ -1722,25 +1722,41 @@ class PropertyEditor(QWidget):
 
             pick_btn = QPushButton("选择")
             pick_btn.setStyleSheet(btn_style)
+            pick_btn.setToolTip("从文件选择新截图")
             pick_btn.clicked.connect(self._pick_template)
             row_ly.addWidget(pick_btn)
 
             cap_btn = QPushButton("截取")
             cap_btn.setStyleSheet(btn_style)
+            cap_btn.setToolTip("重新截取屏幕区域")
             cap_btn.clicked.connect(self._capture_screen)
             row_ly.addWidget(cap_btn)
 
+            folder_btn = QPushButton("文件夹")
+            folder_btn.setStyleSheet(btn_style)
+            folder_btn.setToolTip("打开截图所在文件夹")
+            folder_btn.clicked.connect(self._open_template_folder)
+            row_ly.addWidget(folder_btn)
+
+            edit_btn = QPushButton("编辑")
+            edit_btn.setStyleSheet(btn_style)
+            edit_btn.setToolTip("用系统默认编辑器打开截图")
+            edit_btn.clicked.connect(self._edit_template)
+            row_ly.addWidget(edit_btn)
+
             self._form.addRow("模板:", row_w)
 
-            # Thumbnail preview
+            # Thumbnail preview (clickable to edit)
             tpl_name = config.get("template", "")
             if tpl_name and self._template_dir:
                 tpl_path = os.path.join(self._template_dir, f"{tpl_name}.png") if not tpl_name.endswith('.png') else os.path.join(self._template_dir, tpl_name)
                 if os.path.exists(tpl_path):
                     thumb = QLabel()
-                    pix = QPixmap(tpl_path).scaled(120, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    pix = QPixmap(tpl_path).scaled(180, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     thumb.setPixmap(pix)
-                    thumb.setStyleSheet("border:1px solid #e5e7eb;border-radius:3px;")
+                    thumb.setStyleSheet("border:1px solid #e5e7eb;border-radius:3px;cursor:pointer;")
+                    thumb.setToolTip("点击用默认编辑器打开截图")
+                    thumb.mousePressEvent = lambda ev, p=tpl_path: self._open_image(p)
                     self._form.addRow("预览:", thumb)
 
         if "threshold" in config:
@@ -1934,6 +1950,41 @@ class PropertyEditor(QWidget):
         except Exception as e:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "截取失败", f"屏幕截取出错: {e}")
+
+    def _template_path(self) -> Optional[str]:
+        """Return the absolute path to the current template image, or None."""
+        tpl_name = self._current_config.get("template", "")
+        if not tpl_name or not self._template_dir:
+            return None
+        if tpl_name.endswith('.png'):
+            path = os.path.join(self._template_dir, tpl_name)
+        else:
+            path = os.path.join(self._template_dir, f"{tpl_name}.png")
+        return path if os.path.exists(path) else None
+
+    def _open_template_folder(self):
+        """Open File Explorer at the templates directory."""
+        if not self._template_dir:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "提示", "未设置模板目录")
+            return
+        os.makedirs(self._template_dir, exist_ok=True)
+        # Open folder in explorer
+        os.startfile(self._template_dir)
+
+    def _edit_template(self):
+        """Open current template image in the system default editor (e.g. Paint)."""
+        path = self._template_path()
+        if not path:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "提示", "当前没有可编辑的截图")
+            return
+        os.startfile(path)
+
+    def _open_image(self, path: str):
+        """Open an image with the system default viewer/editor."""
+        if os.path.exists(path):
+            os.startfile(path)
 
     def _record_key(self, input_widget: QLineEdit):
         """Record a single keypress into the input field."""
