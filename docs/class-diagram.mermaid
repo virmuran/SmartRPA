@@ -1,0 +1,327 @@
+classDiagram
+    direction TB
+
+    %% ═══════════════════════════════════════════
+    %% 业务层
+    %% ═══════════════════════════════════════════
+
+    class TaskManager {
+        -dict _task_map
+        -str _data_dir
+        +scan_tasks() List~TaskInfo~
+        +get_task_path(name: str) str
+        +rename_task(old_name: str, new_name: str) bool
+        +delete_task(name: str) bool
+        +get_task_meta(path: str) dict
+        +get_template_dir(task_path: str) str
+    }
+
+    class HistoryStore {
+        -str _history_dir
+        +add_record(record: dict) None
+        +query(limit: int, status: str) List~dict~
+        +get_stats() dict
+        +clear() None
+    }
+
+    class AppSettings {
+        -QSettings _settings
+        +get(key: str, default: Any) Any
+        +set(key: str, value: Any) None
+        +theme() str
+        +record_hotkey() str
+        +global_hotkey() str
+        +fast_mode() bool
+    }
+
+    class TaskInfo {
+        +str name
+        +str path
+        +str created
+        +str modified
+        +bool is_bt_format
+    }
+
+    %% ═══════════════════════════════════════════
+    %% 展示层
+    %% ═══════════════════════════════════════════
+
+    class MainWindow {
+        -Sidebar _sidebar
+        -QStackedWidget _content_stack
+        -TaskPage _task_page
+        -HistoryPage _history_page
+        -SettingsPage _settings_page
+        -AdvancedPage _advanced_page
+        -QStatusBar _status
+        -QSystemTrayIcon _tray
+        -QTimer _sched_timer
+        +__init__()
+        -_build()
+        -_switch_page(idx: int)
+        -_start_global_hotkey()
+        -_check_schedule()
+    }
+
+    class TaskPage {
+        -TaskManager _task_manager
+        -HistoryStore _history_store
+        -QListWidget _task_list
+        -QTextEdit _log
+        -QPushButton _run_btn
+        -QPushButton _rec_btn
+        -TaskWorker _worker
+        -ActionRecorder _recorder
+        -int _queue_index
+        -bool _running
+        +scan_tasks()
+        -_add_task_checklist_item(name: str)
+        -_on_run_clicked()
+        -_on_record_clicked()
+        -_on_task_finished(stats: dict)
+        -log_msg(msg: str, level: str)
+    }
+
+    class HistoryPage {
+        -HistoryStore _history_store
+        -QListWidget _history_list
+        -QLabel _stats_label
+        +refresh()
+        -_on_filter_changed(status: str)
+    }
+
+    class SettingsPage {
+        -AppSettings _settings
+        -QComboBox _theme_switch
+        -QLabel _hk_label
+        -QLabel _ghk_label
+        +load_settings()
+        -_on_hotkey_config()
+        -_on_theme_change(mode: str)
+    }
+
+    class AdvancedPage {
+        -FlowEditor _flow_editor
+        -TaskManager _task_manager
+        +load_flow_editor()
+        -_on_task_selected(name: str)
+    }
+
+    class Theme {
+        +str BG
+        +str SURFACE
+        +str CARD
+        +str TEXT
+        +str TEXT2
+        +str TEXT3
+        +str ACCENT
+        +str LINE
+        +apply(mode: str)
+        +build_qss() str
+    }
+
+    %% ═══════════════════════════════════════════
+    %% 录制 & 执行
+    %% ═══════════════════════════════════════════
+
+    class ActionRecorder {
+        -bool _active
+        -List _events
+        -str _stop_key
+        +Signal log
+        +Signal finished
+        +run()
+        +stop()
+        -_build_task() str
+    }
+    <<QThread>> ActionRecorder
+
+    class TaskWorker {
+        -str _task_file
+        -str _tpl_dir
+        -bool _no_popup
+        -tuple _region
+        -bool _fast_mode
+        -bool _active
+        -TaskEngine | BTEngine _engine
+        +Signal log
+        +Signal finished
+        +Signal step
+        +run()
+        +stop()
+        -_is_bt_format(path: str) bool
+    }
+    <<QThread>> TaskWorker
+
+    class FlowEditor {
+        -Controller _controller
+        -Vision _vision
+        -TaskManager _task_manager
+        +load_task(path: str)
+        +save_task()
+        +render_tree()
+    }
+
+    %% ═══════════════════════════════════════════
+    %% 引擎层
+    %% ═══════════════════════════════════════════
+
+    class TaskEngine {
+        -Controller controller
+        -Vision vision
+        -PopupHandler popup
+        -Dict _tasks
+        -Dict _meta
+        -Dict _vars
+        -bool _running
+        -Dict _stats
+        +load(path: str)
+        +run(entry: str, max_steps: int)
+        +stop()
+        +set_window_title(title: str)
+        +on(name: str, func: Callable)
+        -_execute_step(screenshot, task: dict) bool
+        -_do_click(screenshot, params) bool
+        -_do_press(params) bool
+        -_do_type(params) bool
+        -_do_wait(params) bool
+        -_do_wait_until(params) bool
+        -_do_hotkey(params) bool
+        -_do_move(screenshot, params) bool
+        -_calibrate_anchor() Tuple
+    }
+
+    class BTEngine {
+        -ActionContext _ctx
+        -BTNode _root
+        -Dict _node_map
+        +load(path: str)
+        +run()
+        +stop()
+        +set_window_title(title: str)
+        -_tick(node: BTNode) Status
+    }
+
+    class ActionContext {
+        +Controller controller
+        +Vision vision
+        +PopupHandler popup
+        +Dict vars
+        +Dict stats
+        +Tuple anchor_offset
+        +Any screenshot
+    }
+
+    class BTNode {
+        <<abstract>>
+        +Status tick(ctx: ActionContext)
+    }
+
+    class ActionNode {
+        +str action
+        +dict params
+        +Status tick(ctx: ActionContext)
+    }
+
+    class SequenceNode {
+        +List~BTNode~ children
+        +Status tick(ctx: ActionContext)
+    }
+
+    class SelectorNode {
+        +List~BTNode~ children
+        +Status tick(ctx: ActionContext)
+    }
+
+    class RetryNode {
+        +BTNode child
+        +int count
+        +Status tick(ctx: ActionContext)
+    }
+
+    %% ═══════════════════════════════════════════
+    %% 驱动层
+    %% ═══════════════════════════════════════════
+
+    class Controller {
+        -mss _sct
+        -HumanLike _human
+        -List~Monitor~ _monitors
+        +screenshot() ndarray
+        +click(x: int, y: int)
+        +move_to(x: int, y: int)
+        +press_key(key: str)
+        +type_text(text: str)
+        +drag(x1, y1, x2, y2)
+        +scroll(direction: str, amount: int)
+        +random_delay(type: str)
+        +capture_origin Tuple
+    }
+
+    class Vision {
+        -str template_dir
+        -Dict _cache
+        +find(screenshot, template, threshold, roi) Found
+        +find_all(screenshot, template, threshold) List~Found~
+        +ocr(screenshot, roi, lang) str
+        +find_text(screenshot, keyword, roi, lang) Found
+        +find_color_region(screenshot, target, tolerance, min_pct, roi) Found
+        +set_template_dir(path: str)
+    }
+
+    class HumanLike {
+        +bool fast_mode
+        +generate_path(start, end) List~Tuple~
+        +random_delay(delay_type: str) float
+    }
+
+    class PopupHandler {
+        +bool enabled
+        +handle(screenshot) bool
+        +register_builtin_strategies()
+    }
+
+    %% ═══════════════════════════════════════════
+    %% 关系
+    %% ═══════════════════════════════════════════
+
+    MainWindow *-- TaskPage
+    MainWindow *-- HistoryPage
+    MainWindow *-- SettingsPage
+    MainWindow *-- AdvancedPage
+
+    TaskPage --> TaskManager : uses
+    TaskPage --> HistoryStore : uses
+    TaskPage --> TaskWorker : creates
+    TaskPage --> ActionRecorder : creates
+
+    HistoryPage --> HistoryStore : uses
+
+    SettingsPage --> AppSettings : uses
+
+    AdvancedPage --> FlowEditor : contains
+    AdvancedPage --> TaskManager : uses
+
+    TaskWorker --> TaskEngine : creates
+    TaskWorker --> BTEngine : creates
+    TaskWorker --> Controller : creates
+    TaskWorker --> Vision : creates
+
+    TaskEngine --> Controller : uses
+    TaskEngine --> Vision : uses
+    TaskEngine --> PopupHandler : uses
+
+    BTEngine --> Controller : uses
+    BTEngine --> Vision : uses
+    BTEngine --> PopupHandler : uses
+    BTEngine --> ActionContext : uses
+    BTEngine --> BTNode : root
+
+    BTNode <|-- SequenceNode
+    BTNode <|-- SelectorNode
+    BTNode <|-- RetryNode
+    BTNode <|-- ActionNode
+
+    Controller --> HumanLike : uses
+    Controller --> mss : uses
+    Vision --> OpenCV : uses
