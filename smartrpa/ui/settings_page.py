@@ -87,8 +87,7 @@ class SettingsPage(QWidget):
         ly.addWidget(section_title("高级工具"))
         # Embed the advanced page widget at the bottom
         from smartrpa.ui.advanced_page import AdvancedPage
-        self._advanced_widget = AdvancedPage()
-        self._advanced_widget.setStyleSheet("background:transparent;")
+        self._advanced_widget = AdvancedPage(embedded=True)
         ly.addWidget(self._advanced_widget)
 
         ly.addStretch(1)

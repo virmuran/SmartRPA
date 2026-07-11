@@ -26,10 +26,16 @@ from smartrpa.ui.theme import (
 class AdvancedPage(QWidget):
     """Page for advanced features: flow editing, task file management."""
 
-    def __init__(self, parent=None):
-        """Initialize the advanced page."""
+    def __init__(self, parent=None, embedded: bool = False):
+        """Initialize the advanced page.
+
+        Args:
+            parent: parent widget.
+            embedded: if True, hide page title and flatten cards for nesting.
+        """
         super().__init__(parent)
         self._main_window = None
+        self._embedded = embedded
         self._build()
 
     # ── Public: dependency injection ──
@@ -50,38 +56,46 @@ class AdvancedPage(QWidget):
 
     def _build(self) -> None:
         """Construct the advanced page layout."""
-        self.setStyleSheet(f"background: {T.BG};")
+        self.setStyleSheet(f"background: {T.CARD if not self._embedded else 'transparent'};")
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(T.SP_LG, T.SP_LG, T.SP_LG, T.SP_LG)
+        outer.setContentsMargins(0 if self._embedded else T.SP_LG, 0 if self._embedded else T.SP_LG, 0, 0)
         outer.setSpacing(T.SP_LG)
 
-        outer.addWidget(page_title("高级功能"))
-        outer.addWidget(page_subtitle("以下功能面向有经验的用户"))
+        if not self._embedded:
+            outer.addWidget(page_title("高级功能"))
+            outer.addWidget(page_subtitle("以下功能面向有经验的用户"))
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        inner = QWidget()
-        inner.setStyleSheet("background:transparent;")
-        ly = QVBoxLayout(inner)
-        ly.setContentsMargins(0, 0, T.SP_SM, 0)
-        ly.setSpacing(T.SP_LG)
-        scroll.setWidget(inner)
+        if self._embedded:
+            # Cards go directly into the layout (no nested scroll area)
+            self._add_cards(outer)
+            outer.addStretch(1)
+        else:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            inner = QWidget()
+            inner.setStyleSheet("background:transparent;")
+            ly = QVBoxLayout(inner)
+            ly.setContentsMargins(0, 0, T.SP_SM, 0)
+            ly.setSpacing(T.SP_LG)
+            scroll.setWidget(inner)
+            self._add_cards(ly)
+            ly.addStretch(1)
+            outer.addWidget(scroll, 1)
 
+    def _add_cards(self, layout) -> None:
+        """Add the advanced tool cards to the given layout."""
         # ═══ Card: 任务文件管理 ═══
         self._card_files = self._build_files_card()
-        ly.addWidget(self._card_files)
+        layout.addWidget(self._card_files)
 
         # ═══ Card: 导入导出 ═══
         self._card_io = self._build_io_card()
-        ly.addWidget(self._card_io)
+        layout.addWidget(self._card_io)
 
         # ═══ Card: 工具与参考 ═══
         self._card_ref = self._build_ref_card()
-        ly.addWidget(self._card_ref)
-
-        ly.addStretch(1)
-        outer.addWidget(scroll, 1)
+        layout.addWidget(self._card_ref)
 
     # ── Card: 任务文件管理 ──
 
