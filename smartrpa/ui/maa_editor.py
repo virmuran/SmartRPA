@@ -6,6 +6,7 @@ Steps convert to behavior tree JSON on save.
 import os
 import json
 import datetime
+from collections import Counter
 from copy import deepcopy
 from typing import List, Optional
 
@@ -259,6 +260,21 @@ class MAAEditor(QDialog):
         act_row.addWidget(self._action_combo, 1)
         right_ly.addLayout(act_row)
 
+        # Window picker
+        win_row = QHBoxLayout()
+        win_row.addWidget(QLabel("窗口:"))
+        self._window_combo = QComboBox()
+        self._window_combo.setEditable(True)
+        self._window_combo.setPlaceholderText("选择或输入目标窗口标题...")
+        self._window_combo.currentTextChanged.connect(self._on_window_changed)
+        win_row.addWidget(self._window_combo, 1)
+
+        refresh_win_btn = btn_ghost("刷新")
+        refresh_win_btn.setToolTip("重新扫描当前打开的窗口")
+        refresh_win_btn.clicked.connect(self._refresh_windows)
+        win_row.addWidget(refresh_win_btn)
+        right_ly.addLayout(win_row)
+
         # Template (for click/find/wait_until)
         self._tpl_row = QHBoxLayout()
         self._tpl_row.addWidget(QLabel("模板:"))
@@ -268,8 +284,9 @@ class MAAEditor(QDialog):
             f"padding:6px 10px;min-height:28px;max-height:28px;background:{T.CARD};")
         self._tpl_row.addWidget(self._tpl_inp, 1)
 
-        cap_btn = btn_ghost("截取+框ROI")
-        cap_btn.clicked.connect(self._capture_and_roi)
+        cap_btn = btn_ghost("截图")
+        cap_btn.setToolTip("框选屏幕区域，截取为模板图片")
+        cap_btn.clicked.connect(self._capture_template_only)
         self._tpl_row.addWidget(cap_btn)
 
         pick_btn = btn_ghost("选文件")
@@ -286,7 +303,8 @@ class MAAEditor(QDialog):
             f"padding:6px 10px;min-height:28px;max-height:28px;background:{T.CARD};")
         self._roi_row.addWidget(self._roi_lbl, 1)
 
-        roi_btn = btn_ghost("框选")
+        roi_btn = btn_ghost("框选ROI")
+        roi_btn.setToolTip("框选屏幕上的目标搜索区域，自动记录为窗口相对坐标")
         roi_btn.clicked.connect(self._select_roi_only)
         self._roi_row.addWidget(roi_btn)
         right_ly.addLayout(self._roi_row)
@@ -328,6 +346,48 @@ class MAAEditor(QDialog):
         root.addLayout(bottom_row)
 
         self._refresh_param_fields()
+        self._refresh_windows()
+
+    # ── Window management ──
+
+    def _refresh_windows(self):
+        """Scan all open windows and populate the combo box."""
+        try:
+            import win32gui
+            windows = []
+            def enum_cb(hwnd, _):
+                if win32gui.IsWindowVisible(hwnd):
+                    title = win32gui.GetWindowText(hwnd)
+                    if title and title not in ("", "Program Manager"):
+                        windows.append(title)
+            win32gui.EnumWindows(enum_cb, None)
+
+            current = self._window_combo.currentText()
+            self._window_combo.blockSignals(True)
+            self._window_combo.clear()
+            for w in sorted(set(windows)):
+                self._window_combo.addItem(w)
+            if current and self._window_combo.findText(current) >= 0:
+                self._window_combo.setCurrentText(current)
+            self._window_combo.blockSignals(False)
+        except (ImportError, Exception):
+            pass
+
+    def _on_window_changed(self, title):
+        """Save selected window title to current step."""
+        if self._current_step_idx >= 0:
+            self._steps[self._current_step_idx].window_title = title
+        # Also store globally for the task
+        self._selected_window = title
+
+    def _minimize_before_action(self):
+        """Minimize SmartRPA before opening overlay windows."""
+        for w in QApplication.topLevelWidgets():
+            if w.isVisible() and w != self:
+                w.showMinimized()
+        self.showMinimized()
+        QApplication.processEvents()
+        import time; time.sleep(0.3)
 
     # ── Step list management ──
 
@@ -381,6 +441,14 @@ class MAAEditor(QDialog):
             self._action_combo.blockSignals(True)
             self._action_combo.setCurrentIndex(act_idx)
             self._action_combo.blockSignals(False)
+
+        # Window
+        if step.window_title:
+            idx = self._window_combo.findText(step.window_title)
+            if idx >= 0:
+                self._window_combo.setCurrentIndex(idx)
+            else:
+                self._window_combo.setEditText(step.window_title)
 
         # Template
         self._tpl_inp.setText(step.template if step.template else "(未选择)")
@@ -539,75 +607,61 @@ class MAAEditor(QDialog):
 
     # ── ROI / Template capture ──
 
-    def _capture_and_roi(self):
-        """Capture a screen region and save as template + ROI."""
+    def _capture_template_only(self):
+        """Capture a screen region and save ONLY as template (no ROI)."""
         if self._current_step_idx < 0:
             self._add_step()
             self._step_list.setCurrentRow(len(self._steps) - 1)
             self._current_step_idx = len(self._steps) - 1
 
+        self._minimize_before_action()
         selector = ROISelector(self)
-        selector.regionSelected.connect(self._on_roi_selected)
+        selector.regionSelected.connect(lambda x, y, w, h: self._capture_template(x, y, w, h))
         selector.exec()
 
     def _select_roi_only(self):
         if self._current_step_idx < 0:
             return
+        self._minimize_before_action()
         selector = ROISelector(self)
-        selector.regionSelected.connect(lambda x, y, w, h: self._on_roi_only(x, y, w, h))
+        selector.regionSelected.connect(self._on_roi_only)
         selector.exec()
-
-    def _on_roi_selected(self, x, y, w, h):
-        """ROI selected + auto-capture template with window-relative coordinates."""
-        if self._current_step_idx < 0:
-            return
-        step = self._steps[self._current_step_idx]
-
-        # Detect foreground window for relative ROI anchoring
-        wx, wy = self._get_foreground_window_pos()
-        step.window_title = self._get_foreground_window_title()
-
-        # Store relative ROI (absolute - window top-left)
-        if wx is not None:
-            step.roi = [x - wx, y - wy, w, h]
-            self._roi_lbl.setText(f"相对[{step.roi[0]}, {step.roi[1]}] {w}x{h}  ({step.window_title or '窗口'})")
-        else:
-            step.roi = [x, y, w, h]
-            self._roi_lbl.setText(f"绝对[{x}, {y}] {w}x{h}  (未检测到窗口)")
-
-        self._capture_template(x, y, w, h)
 
     def _on_roi_only(self, x, y, w, h):
         if self._current_step_idx < 0:
             return
         step = self._steps[self._current_step_idx]
-        wx, wy = self._get_foreground_window_pos()
-        step.window_title = self._get_foreground_window_title()
+        step.window_title = self._window_combo.currentText()
+
+        # Look up the chosen window's position (not just foreground)
+        wx, wy = self._get_foreground_window_pos(step.window_title)
         if wx is not None:
             step.roi = [x - wx, y - wy, w, h]
             self._roi_lbl.setText(f"相对[{step.roi[0]}, {step.roi[1]}] {w}x{h}  ({step.window_title or '窗口'})")
         else:
             step.roi = [x, y, w, h]
-            self._roi_lbl.setText(f"绝对[{x}, {y}] {w}x{h}  (未检测到窗口)")
+            self._roi_lbl.setText(f"绝对[{x}, {y}] {w}x{h}  (窗口未找到)")
 
-    def _get_foreground_window_pos(self):
-        """Get the top-left position of the foreground window. Returns (x, y) or (None, None)."""
+    def _get_foreground_window_pos(self, title: str = ""):
+        """Get the top-left position of a window by title (or foreground if no title given).
+        Returns (x, y) or (None, None)."""
         try:
             import win32gui
+            if title:
+                result = []
+                def find_by_title(hwnd, _):
+                    if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd) == title:
+                        rect = win32gui.GetWindowRect(hwnd)
+                        result.append((rect[0], rect[1]))
+                win32gui.EnumWindows(find_by_title, None)
+                if result:
+                    return result[0]
+            # Fallback to foreground
             hwnd = win32gui.GetForegroundWindow()
             rect = win32gui.GetWindowRect(hwnd)
             return rect[0], rect[1]
         except (ImportError, Exception):
             return None, None
-
-    def _get_foreground_window_title(self) -> str:
-        """Get the title of the foreground window."""
-        try:
-            import win32gui
-            hwnd = win32gui.GetForegroundWindow()
-            return win32gui.GetWindowText(hwnd)
-        except (ImportError, Exception):
-            return ""
 
     def _capture_template(self, x, y, w, h):
         """Capture the ROI region and save as a template image."""
