@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
         self._settings = QSettings("SmartRPA", "SmartRPA")
 
         # Restore theme preference
-        saved = self._settings.value("theme", "light")
+        saved = self._settings.value("theme", "native")
         T.apply(saved)
 
         self._build()
@@ -401,7 +401,8 @@ class MainWindow(QMainWindow):
 
         # ── System Tray ──
         self._tray = QSystemTrayIcon(self)
-        self._tray.setIcon(QIcon(resource_path("SmartRPA.ico")))
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "SmartRPA.ico")
+        self._tray.setIcon(QIcon(icon_path))
         self._tray.setToolTip("SmartRPA")
         tray_menu = QMenu()
         show_action = tray_menu.addAction("显示窗口")

@@ -214,22 +214,14 @@ class SettingsPage(QWidget):
 
         theme_row = QHBoxLayout()
         theme_row.setSpacing(T.SP_SM)
-        theme_lbl = QLabel("主题模式:")
+        theme_lbl = QLabel("暗色模式:")
         theme_lbl.setStyleSheet(f"font-size:13px;color:{T.TEXT2};")
         theme_row.addWidget(theme_lbl)
 
-        self.theme_light_btn = QPushButton("☀ 浅色")
-        self.theme_light_btn.setCheckable(True)
-        self.theme_light_btn.setCursor(Qt.PointingHandCursor)
-        self.theme_light_btn.clicked.connect(lambda: self._set_theme("light"))
-
-        self.theme_dark_btn = QPushButton("🌙 深色")
-        self.theme_dark_btn.setCheckable(True)
-        self.theme_dark_btn.setCursor(Qt.PointingHandCursor)
-        self.theme_dark_btn.clicked.connect(lambda: self._set_theme("dark"))
-
-        theme_row.addWidget(self.theme_light_btn)
-        theme_row.addWidget(self.theme_dark_btn)
+        self.dark_cb = QCheckBox()
+        self.dark_cb.setCursor(Qt.PointingHandCursor)
+        self.dark_cb.toggled.connect(lambda checked: self._set_theme("dark" if checked else "native"))
+        theme_row.addWidget(self.dark_cb)
         theme_row.addStretch()
         ly.addLayout(theme_row)
 
@@ -316,7 +308,7 @@ class SettingsPage(QWidget):
         self._update_speed_btn_styles(speed)
 
         # Theme
-        theme = self._settings.value("theme", "light")
+        theme = self._settings.value("theme", "native")
         self._update_theme_btn_styles(theme)
 
     def _save_settings(self) -> None:
@@ -499,81 +491,22 @@ class SettingsPage(QWidget):
             """)
 
     def _update_theme_btn_styles(self, mode: str) -> None:
-        """Update theme toggle button styles.
-
-        Args:
-            mode: 'light' or 'dark'.
-        """
-        is_light = (mode == "light")
-
-        if is_light:
-            self.theme_light_btn.setChecked(True)
-            self.theme_dark_btn.setChecked(False)
-            self.theme_light_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {T.SURFACE};
-                    color: {T.TEXT};
-                    border: 1px solid {T.LINE_LIGHT};
-                    border-radius: {T.R_SM}px;
-                    padding: 4px 10px; font-weight: 700; font-size: 12px;
-                    min-height: 26px; max-height: 26px;
-                }}
-            """)
-            self.theme_dark_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {T.CARD};
-                    color: {T.TEXT2};
-                    border: 1px solid {T.LINE};
-                    border-radius: {T.R_SM}px;
-                    padding: 4px 10px; font-weight: 600; font-size: 12px;
-                    min-height: 26px; max-height: 26px;
-                }}
-                QPushButton:hover {{ border: 1px solid {T.LINE_LIGHT}; }}
-            """)
-        else:
-            self.theme_light_btn.setChecked(False)
-            self.theme_dark_btn.setChecked(True)
-            self.theme_light_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {T.CARD};
-                    color: {T.TEXT2};
-                    border: 1px solid {T.LINE};
-                    border-radius: {T.R_SM}px;
-                    padding: 4px 10px; font-weight: 600; font-size: 12px;
-                    min-height: 26px; max-height: 26px;
-                }}
-                QPushButton:hover {{ border: 1px solid {T.LINE_LIGHT}; }}
-            """)
-            self.theme_dark_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {T.SURFACE};
-                    color: {T.TEXT};
-                    border: 1px solid {T.LINE_LIGHT};
-                    border-radius: {T.R_SM}px;
-                    padding: 4px 10px; font-weight: 700; font-size: 12px;
-                    min-height: 26px; max-height: 26px;
-                }}
-            """)
+        """Update dark mode checkbox state."""
+        is_dark = (mode == "dark")
+        if hasattr(self, 'dark_cb'):
+            self.dark_cb.setChecked(is_dark)
 
     # ═══════════════════════════════════════════════
     #  Theme Refresh
     # ═══════════════════════════════════════════════
 
     def refresh_theme(self) -> None:
-        """Refresh all inline styles after a theme change."""
+        """Refresh inline styles after a theme change."""
         self.setStyleSheet(f"background: {T.BG};")
         self._update_theme_btn_styles(T.mode)
         self._update_speed_btn_styles(
             self._settings.value("run/speed", "normal")
         )
-        # Refresh card backgrounds
-        for obj_name in ["_card_record", "_card_run", "_card_appearance", "_card_about"]:
-            card = self.findChild(QWidget, obj_name)
-            if card:
-                card.setStyleSheet(
-                    f"#{obj_name}{{background:{T.CARD};border:none;border-radius:{T.R_LG}px;}}"
-                )
-        # Refresh labels
         self.hk_label.setStyleSheet(f"font-size:13px;color:{T.TEXT2};")
         self.ghk_label.setStyleSheet(f"font-size:13px;color:{T.TEXT2};")
         self.tpl_dir_label.setStyleSheet(f"font-size:13px;color:{T.TEXT2};")
