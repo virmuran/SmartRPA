@@ -14,7 +14,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("SmartRPA")
     app.setFont(QFont("Microsoft YaHei", 10))
-    app.setStyle("windowsvista")
+    app.setStyle("Fusion")
     app.setStyleSheet(build_base_qss())
 
     mw = MainWindow()

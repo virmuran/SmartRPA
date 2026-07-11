@@ -49,7 +49,7 @@ def data_dir(subdir: str = "") -> str:
 # ═══════════════════════════════════════════════
 
 class Theme:
-    """Dual-theme design tokens — call Theme.apply('light'|'dark'|'native') to switch."""
+    """Dual-theme design tokens — call Theme.apply('light'|'dark') to switch."""
 
     # Shared (invariant across themes)
     SP_XS   = 4
@@ -59,105 +59,105 @@ class Theme:
     SP_XL   = 20
     SP_2XL  = 28
     SP_3XL  = 40
-    R_SM    = 2
-    R_MD    = 3
-    R_LG    = 4
+    R_SM    = 4
+    R_MD    = 6
+    R_LG    = 12
     R_XL    = 20
     ACCENT     = "#7c6ff7"
     ACCENT2    = "#a78bfa"
-    GREEN      = "#5a5a6a"
+    GREEN      = "#22c55e"
     ORANGE     = "#fbbf24"
     RED        = "#f87171"
     BLUE       = "#60a5fa"
 
     def __init__(self):
-        self.mode = "native"
+        self.mode = "light"
 
     # ── Theme-dependent properties ──
 
     @property
     def BG(self):
-        return "#f0f0f0"  # Windows classic light gray
+        return "#f4f4f8" if self.mode == "light" else "#0c0c12"
 
     @property
     def SURFACE(self):
-        return "#f0f0f0"  # same as BG, no distinction
+        return "#e8e9ee" if self.mode == "light" else "#14141e"
 
     @property
     def CARD(self):
-        return "#ffffff"
+        return "#ffffff" if self.mode == "light" else "#1c1c28"
 
     @property
     def CARD_HOVER(self):
-        return "#e8f0fe"
+        return "#f0f0f5" if self.mode == "light" else "#24243a"
 
     @property
     def LOG_BG(self):
-        return "#ffffff"
+        return "#f5f5f8" if self.mode == "light" else "#0e0e16"
 
     @property
     def LOG_TEXT(self):
-        return "#333333"
+        return "#4a4a5a" if self.mode == "light" else "#94a1b8"
 
     @property
     def ACCENT_DIM(self):
-        return "#e8f0fe"
+        return "#eae6ff" if self.mode == "light" else "#2e2656"
 
     @property
     def GREEN_BG(self):
-        return "transparent"
+        return "#f0fdf4" if self.mode == "light" else "#1a2a1e"
 
     @property
     def ORANGE_BG(self):
-        return "transparent"
+        return "#fffbeb" if self.mode == "light" else "#2d2510"
 
     @property
     def RED_BG(self):
-        return "transparent"
+        return "#fef2f2" if self.mode == "light" else "#2d1418"
 
     @property
     def BLUE_BG(self):
-        return "transparent"
+        return "#eff6ff" if self.mode == "light" else "#1a2540"
 
     # ── Text colors ──
-    TEXT_LIGHT  = "#000000"
-    TEXT2_LIGHT = "#555555"
-    TEXT3_LIGHT = "#888888"
+    TEXT_LIGHT  = "#1d1d1f"
+    TEXT2_LIGHT = "#4a4a5a"
+    TEXT3_LIGHT = "#7a7a82"
     TEXT_DARK   = "#e8eaf0"
     TEXT2_DARK  = "#b0b4c0"
     TEXT3_DARK  = "#8c90a0"
 
     @property
     def TEXT(self):
-        return self.TEXT_LIGHT if self.mode != "dark" else self.TEXT_DARK
+        return self.TEXT_LIGHT if self.mode == "light" else self.TEXT_DARK
 
     @property
     def TEXT2(self):
-        return self.TEXT2_LIGHT if self.mode != "dark" else self.TEXT2_DARK
+        return self.TEXT2_LIGHT if self.mode == "light" else self.TEXT2_DARK
 
     @property
     def TEXT3(self):
-        return self.TEXT3_LIGHT if self.mode != "dark" else self.TEXT3_DARK
+        return self.TEXT3_LIGHT if self.mode == "light" else self.TEXT3_DARK
 
     @property
     def LINE(self):
-        return "#d0d0d0"
+        return "#e2e2e8" if self.mode == "light" else "#252536"
 
     @property
     def LINE_LIGHT(self):
-        return "#c0c0c0"
+        return "#c8c8d0" if self.mode == "light" else "#32324a"
 
     @property
     def DANGER_BORDER(self):
-        return "#fca5a5"
+        return "#fca5a5" if self.mode == "light" else "#5c2024"
 
     @property
     def DANGER_HOVER_BG(self):
-        return "#fee2e2"
+        return "#fee2e2" if self.mode == "light" else "#3d1a1e"
 
     def apply(self, mode: str) -> None:
-        """Switch theme mode ('light'|'dark'|'native'). 'light' is alias for native."""
-        self.mode = mode if mode in ("dark", "native") else "native"
+        """Switch theme mode ('light' or 'dark')."""
+        self.mode = mode if mode in ("light", "dark") else "light"
 
 
 # Global theme instance (default light)
@@ -169,10 +169,10 @@ T = Theme()
 # ═══════════════════════════════════════════════
 
 def build_base_qss() -> str:
-    """Minimal QSS — let native Windows style do the heavy lifting."""
+    """Re-generate QSS from current theme tokens."""
     return f"""
 * {{
-    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    font-family: "Microsoft YaHei", "PingFang SC", "SF Pro Display", sans-serif;
     font-size: 13px;
     outline: none;
 }}
@@ -188,13 +188,124 @@ QLabel {{
 
 QCheckBox {{
     color: {T.TEXT};
-    spacing: 8px;
+    spacing: 10px;
+}}
+QCheckBox::indicator {{
+    width: 18px; height: 18px;
+    border-radius: 5px;
+    border: 2px solid {T.LINE_LIGHT};
+    background: {T.CARD};
+}}
+QCheckBox::indicator:checked {{
+    background: {T.ACCENT};
+    border-color: {T.ACCENT};
+}}
+QCheckBox::indicator:hover {{
+    border-color: {T.ACCENT2};
+}}
+
+QComboBox, QSpinBox {{
+    background: {T.CARD};
+    color: {T.TEXT};
+    border: 1px solid {T.LINE};
+    border-radius: {T.R_SM}px;
+    padding: 7px 14px;
+    min-height: 34px;
+    max-height: 38px;
+}}
+QComboBox:focus, QSpinBox:focus {{
+    border-color: {T.ACCENT};
+}}
+QComboBox:drop-down {{
+    border: none;
+    width: 24px;
+}}
+QComboBox QAbstractItemView {{
+    background: {T.CARD};
+    color: {T.TEXT};
+    border: 1px solid {T.LINE};
+    outline: none;
+    selection-background-color: {T.ACCENT};
+    selection-color: white;
+    border-radius: {T.R_SM}px;
+    padding: 4px;
+}}
+
+QPushButton {{
+    background: {T.CARD};
+    color: {T.TEXT2};
+    border: 1px solid {T.LINE};
+    border-radius: {T.R_SM}px;
+    padding: 8px 18px;
+    min-height: 34px;
+    font-weight: 500;
+}}
+QPushButton:hover {{
+    background: {T.CARD_HOVER};
+    border-color: {T.LINE_LIGHT};
+    color: {T.TEXT};
+}}
+QPushButton:pressed {{
+    background: {T.SURFACE};
+}}
+
+QScrollArea {{
+    border: none;
+    background: transparent;
+}}
+QScrollBar:vertical {{
+    background: transparent;
+    width: 6px;
+    border: none;
+}}
+QScrollBar::handle:vertical {{
+    background: {T.LINE_LIGHT};
+    border-radius: 3px;
+    min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {T.TEXT3};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
+}}
+
+QProgressBar {{
+    background: {T.LINE};
+    border: none;
+    border-radius: 2px;
+    height: 3px;
+}}
+QProgressBar::chunk {{
+    background: {T.ACCENT};
+    border-radius: 2px;
+}}
+
+QTextEdit {{
+    background: {T.CARD};
+    color: {T.TEXT};
+    border: 1px solid {T.LINE};
+    border-radius: {T.R_SM}px;
+    padding: 12px;
+    font-size: 12px;
 }}
 
 QSplitter::handle {{
     background: {T.LINE};
     width: 1px;
-}}"""
+}}
+
+QStatusBar {{
+    background: {T.SURFACE};
+    color: {T.TEXT3};
+    font-size: 12px;
+    border-top: 1px solid {T.LINE};
+    padding: 3px 12px;
+}}
+QStatusBar::item {{
+    border: none;
+}}
+"""
 
 
 # ═══════════════════════════════════════════════

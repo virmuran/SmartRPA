@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
         self._settings = QSettings("SmartRPA", "SmartRPA")
 
         # Restore theme preference
-        saved = self._settings.value("theme", "native")
+        saved = self._settings.value("theme", "light")
         T.apply(saved)
 
         self._build()
