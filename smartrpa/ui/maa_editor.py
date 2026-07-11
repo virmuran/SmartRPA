@@ -11,10 +11,10 @@ from copy import deepcopy
 from typing import List, Optional
 
 from PySide6.QtWidgets import (
-    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    QWidget, QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QTabWidget,
     QPushButton, QLabel, QComboBox, QSpinBox, QDoubleSpinBox,
     QListWidget, QListWidgetItem, QMessageBox, QApplication,
-    QFileDialog,
+    QFileDialog, QLineEdit,
 )
 from PySide6.QtCore import Qt, QRect, Signal, QPoint
 from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QFont, QBrush
@@ -168,21 +168,18 @@ class ROISelector(QDialog):
 #  MAA Editor Dialog
 # ═══════════════════════════════════════════════
 
-class MAAEditor(QDialog):
-    """MAA-style linear step editor — one step = one template + one ROI + one action."""
+class MAAEditor(QWidget):
+    """MAA-style linear step editor widget — embeddable in tabs."""
 
     taskSaved = Signal(str)  # file_path
 
     def __init__(self, parent=None, tpl_dir: str = ""):
         super().__init__(parent)
-        self.setWindowTitle("MAA 模式编辑器")
-        self.resize(900, 600)
-        self.setStyleSheet(f"background:{T.BG};")
-
         self._tpl_dir = tpl_dir
         self._steps: List[StepData] = []
         self._current_step_idx = -1
         self._task_mgr = TaskManager()
+        self._selected_window = ""
 
         self._build()
 
@@ -530,14 +527,12 @@ class MAAEditor(QDialog):
             elif p in ("key", "text"):
                 lbl = QLabel(p + ":")
                 self._param_row.addWidget(lbl)
-                from PySide6.QtWidgets import QLineEdit
                 inp = QLineEdit()
                 inp.textChanged.connect(lambda v, f=p: self._set_step_attr(f, v))
                 self._param_row.addWidget(inp, 1)
             elif p == "keys":
                 lbl = QLabel("键位:")
                 self._param_row.addWidget(lbl)
-                from PySide6.QtWidgets import QLineEdit
                 inp = QLineEdit()
                 inp.setPlaceholderText("逗号分隔, 如 ctrl,c")
                 inp.textChanged.connect(lambda v, f=p: self._set_step_attr(f, v))
@@ -791,4 +786,3 @@ class MAAEditor(QDialog):
 
         QMessageBox.information(self, "保存成功", f"任务已保存:\n{task_path}")
         self.taskSaved.emit(task_path)
-        self.accept()

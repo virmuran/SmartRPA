@@ -68,14 +68,6 @@ class AdvancedPage(QWidget):
         ly.setSpacing(T.SP_LG)
         scroll.setWidget(inner)
 
-        # ═══ Card: 流程编辑器 ═══
-        self._card_flow = self._build_flow_card()
-        ly.addWidget(self._card_flow)
-
-        # ═══ Card: MAA 模式编辑器 ═══
-        self._card_maa = self._build_maa_card()
-        ly.addWidget(self._card_maa)
-
         # ═══ Card: 任务文件管理 ═══
         self._card_files = self._build_files_card()
         ly.addWidget(self._card_files)
@@ -90,66 +82,6 @@ class AdvancedPage(QWidget):
 
         ly.addStretch(1)
         outer.addWidget(scroll, 1)
-
-    # ── Card: 流程编辑器 ──
-
-    def _build_flow_card(self) -> QWidget:
-        """Build the flow editor launcher card."""
-        card = QWidget()
-        card.setObjectName("_card_flow")
-        card.setStyleSheet(
-            f"#_card_flow{{background:{T.CARD};border:none;border-radius:{T.R_LG}px;}}"
-        )
-        ly = QVBoxLayout(card)
-        ly.setContentsMargins(T.SP_XL, T.SP_LG, T.SP_XL, T.SP_LG)
-        ly.setSpacing(T.SP_MD)
-
-        ly.addWidget(section_header("流程编辑器"))
-        desc = QLabel("可视化编辑任务流程图，支持行为树和状态机两种模式。")
-        desc.setStyleSheet(f"font-size:12px;color:{T.TEXT3};")
-        desc.setWordWrap(True)
-        ly.addWidget(desc)
-
-        open_btn = btn_primary("打开流程编辑器")
-        open_btn.setCursor(Qt.PointingHandCursor)
-        open_btn.clicked.connect(self._open_flow_editor)
-        ly.addWidget(open_btn)
-
-        return card
-
-    # ── Card: MAA 模式 ──
-
-    def _build_maa_card(self) -> QWidget:
-        """Build the MAA editor launcher card."""
-        card = QWidget()
-        card.setObjectName("_card_maa")
-        card.setStyleSheet(
-            f"#_card_maa{{background:{T.CARD};border:none;border-radius:{T.R_LG}px;}}"
-        )
-        ly = QVBoxLayout(card)
-        ly.setContentsMargins(T.SP_XL, T.SP_LG, T.SP_XL, T.SP_LG)
-        ly.setSpacing(T.SP_MD)
-
-        ly.addWidget(section_header("MAA 模式"))
-        desc = QLabel("线性步骤编辑，每步指定模板图+ROI区域+动作。适合快速搭建简单任务。")
-        desc.setStyleSheet(f"font-size:12px;color:{T.TEXT3};")
-        desc.setWordWrap(True)
-        ly.addWidget(desc)
-
-        open_btn = btn_primary("打开 MAA 编辑器")
-        open_btn.setCursor(Qt.PointingHandCursor)
-        open_btn.clicked.connect(self._open_maa_editor)
-        ly.addWidget(open_btn)
-
-        return card
-
-    def _open_maa_editor(self):
-        from smartrpa.ui.maa_editor import MAAEditor
-        from smartrpa.ui.theme import data_dir
-        ed = MAAEditor(self, tpl_dir=data_dir("templates"))
-        ed.taskSaved.connect(lambda path: QMessageBox.information(
-            self, "任务已创建", f"新任务已保存到:\n{path}"))
-        ed.exec()
 
     # ── Card: 任务文件管理 ──
 
@@ -262,31 +194,6 @@ class AdvancedPage(QWidget):
     # ═══════════════════════════════════════════════
     #  Actions
     # ═══════════════════════════════════════════════
-
-    def _open_flow_editor(self) -> None:
-        """Open the FlowEditor in a new dialog window."""
-        try:
-            from smartrpa.ui.flow_editor import FlowEditor
-
-            # Create a dialog to host the flow editor
-            dialog = QWidget(self.window() if self.window() else None,
-                             Qt.Window)  # top-level window
-            dialog.setWindowTitle("SmartRPA — 流程编辑器")
-            dialog.resize(1100, 720)
-            dialog.setMinimumSize(800, 500)
-
-            dlg_ly = QVBoxLayout(dialog)
-            dlg_ly.setContentsMargins(0, 0, 0, 0)
-
-            editor = FlowEditor()
-            dlg_ly.addWidget(editor)
-
-            dialog.show()
-        except ImportError as e:
-            QMessageBox.warning(
-                self, "无法加载",
-                f"流程编辑器加载失败: {e}",
-            )
 
     def _open_task_dir(self) -> None:
         """Open the user tasks directory in file explorer."""

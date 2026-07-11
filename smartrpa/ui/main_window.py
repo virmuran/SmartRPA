@@ -302,8 +302,9 @@ class MainWindow(QMainWindow):
         nav_items = [
             ("📋", "自动化任务"),
             ("📜", "历史记录"),
-            ("⚙", "设置"),
-            ("🔧", "高级"),
+            ("📊", "流程编辑"),
+            ("🎯", "步骤编辑"),
+            ("⚙", "系统设置"),
         ]
         for icon, label in nav_items:
             btn = SidebarButton(icon, label)
@@ -364,7 +365,6 @@ class MainWindow(QMainWindow):
         from smartrpa.ui.task_page import TaskPage
         from smartrpa.ui.history_page import HistoryPage
         from smartrpa.ui.settings_page import SettingsPage
-        from smartrpa.ui.advanced_page import AdvancedPage
 
         task_page = TaskPage()
         task_page.set_main_window(self)
@@ -374,13 +374,17 @@ class MainWindow(QMainWindow):
         history_page.set_main_window(self)
         self.content_stack.addWidget(history_page)
 
+        # Flow editor page (index 2)
+        flow_page = self._build_flow_page()
+        self.content_stack.addWidget(flow_page)
+
+        # MAA editor page (index 3)
+        maa_page = self._build_maa_page()
+        self.content_stack.addWidget(maa_page)
+
         settings_page = SettingsPage()
         settings_page.set_main_window(self)
         self.content_stack.addWidget(settings_page)
-
-        advanced_page = AdvancedPage()
-        advanced_page.set_main_window(self)
-        self.content_stack.addWidget(advanced_page)
 
         right_ly.addWidget(self.content_stack, 1)
 
@@ -435,6 +439,28 @@ class MainWindow(QMainWindow):
         QApplication.instance().setStyleSheet(build_base_qss())
         self._refresh_all_styles()
         self.theme_changed.emit(mode)
+
+    def _build_flow_page(self) -> QWidget:
+        """Build the flow editor page for the sidebar."""
+        from smartrpa.ui.flow_editor import FlowEditor
+        container = QWidget()
+        ly = QVBoxLayout(container)
+        ly.setContentsMargins(0, 0, 0, 0)
+        ed = FlowEditor()
+        ly.addWidget(ed, 1)
+        return container
+
+    def _build_maa_page(self) -> QWidget:
+        """Build the MAA editor page for the sidebar."""
+        from smartrpa.ui.maa_editor import MAAEditor
+        from smartrpa.ui.theme import data_dir
+        container = QWidget()
+        container.setStyleSheet(f"background: {T.BG};")
+        ly = QVBoxLayout(container)
+        ly.setContentsMargins(0, 0, 0, 0)
+        ed = MAAEditor(container, tpl_dir=data_dir("templates"))
+        ly.addWidget(ed, 1)
+        return container
 
     def _refresh_all_styles(self) -> None:
         """Refresh all inline styles after theme switch."""

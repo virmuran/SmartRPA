@@ -83,6 +83,14 @@ class SettingsPage(QWidget):
         self._card_about = self._build_about_card()
         ly.addWidget(self._card_about)
 
+        # ═══ 分隔: 高级工具 ═══
+        ly.addWidget(section_title("高级工具"))
+        # Embed the advanced page widget at the bottom
+        from smartrpa.ui.advanced_page import AdvancedPage
+        self._advanced_widget = AdvancedPage()
+        self._advanced_widget.setStyleSheet("background:transparent;")
+        ly.addWidget(self._advanced_widget)
+
         ly.addStretch(1)
         outer.addWidget(scroll, 1)
 
