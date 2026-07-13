@@ -76,6 +76,11 @@ class TaskWorker(QThread):
                 if win_title:
                     engine.set_window_title(win_title)
                     self.log.emit(f"窗口锚定: '{win_title}'", "INFO")
+                # Apply window position fix if configured
+                fix_rect = engine._meta.get("fix_window")
+                if fix_rect and win_title:
+                    self._fix_window_position(win_title, fix_rect)
+                    self.log.emit(f"窗口已固定: {fix_rect}", "INFO")
                 self.log.emit(
                     f"BT任务: {os.path.basename(self.task_file)}", "INFO"
                 )

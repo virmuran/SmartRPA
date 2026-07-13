@@ -12,8 +12,8 @@ from typing import List, Optional
 
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QTabWidget,
-    QPushButton, QLabel, QComboBox, QSpinBox, QDoubleSpinBox,
-    QListWidget, QListWidgetItem, QMessageBox, QApplication,
+    QPushButton, QLabel, QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox,
+    QListWidget, QListWidgetItem, QMessageBox, QApplication, QInputDialog,
     QFileDialog, QLineEdit,
 )
 from PySide6.QtCore import Qt, QRect, Signal, QPoint
@@ -180,6 +180,7 @@ class MAAEditor(QWidget):
         self._current_step_idx = -1
         self._task_mgr = TaskManager()
         self._selected_window = ""
+        self._fix_window_rect = None
 
         self._build()
 
@@ -261,8 +262,7 @@ class MAAEditor(QWidget):
         win_row = QHBoxLayout()
         win_row.addWidget(QLabel("窗口:"))
         self._window_combo = QComboBox()
-        self._window_combo.setEditable(True)
-        self._window_combo.setPlaceholderText("选择或输入目标窗口标题...")
+        self._window_combo.setMinimumWidth(180)
         self._window_combo.currentTextChanged.connect(self._on_window_changed)
         win_row.addWidget(self._window_combo, 1)
 
@@ -316,6 +316,17 @@ class MAAEditor(QWidget):
         thresh_row.addWidget(self._threshold_spin, 1)
         right_ly.addLayout(thresh_row)
 
+        # Window position fixer — auto record & restore
+        self._fix_win_cb = QCheckBox("运行时恢复此窗口位置和大小")
+        self._fix_win_cb.setCursor(Qt.PointingHandCursor)
+        self._fix_win_cb.toggled.connect(self._on_fix_win_toggled)
+        right_ly.addWidget(self._fix_win_cb)
+
+        self._fix_win_info = QLabel("")
+        self._fix_win_info.setStyleSheet(f"font-size:11px;color:{T.TEXT3};padding-left:22px;")
+        self._fix_win_info.setVisible(False)
+        right_ly.addWidget(self._fix_win_info)
+
         # Key / Text / Seconds fields (dynamic)
         self._param_row = QHBoxLayout()
         right_ly.addLayout(self._param_row)
@@ -352,29 +363,54 @@ class MAAEditor(QWidget):
         try:
             import win32gui
             windows = []
+            self_title = self.windowTitle() or "SmartRPA"
             def enum_cb(hwnd, _):
-                if win32gui.IsWindowVisible(hwnd):
-                    title = win32gui.GetWindowText(hwnd)
-                    if title and title not in ("", "Program Manager"):
-                        windows.append(title)
+                if not win32gui.IsWindowVisible(hwnd):
+                    return
+                rect = win32gui.GetWindowRect(hwnd)
+                w, h = rect[2] - rect[0], rect[3] - rect[1]
+                # Skip tiny windows and system windows
+                if w < 80 or h < 40:
+                    return
+                title = win32gui.GetWindowText(hwnd)
+                if title and title not in ("", "Program Manager", self_title):
+                    windows.append(title)
             win32gui.EnumWindows(enum_cb, None)
 
             current = self._window_combo.currentText()
             self._window_combo.blockSignals(True)
             self._window_combo.clear()
+            self._window_combo.addItem("-- 请选择窗口 --")
+            self._window_combo.addItem("-- 手动输入窗口标题 --")
+            self._window_combo.insertSeparator(2)
             for w in sorted(set(windows)):
                 self._window_combo.addItem(w)
             if current and self._window_combo.findText(current) >= 0:
                 self._window_combo.setCurrentText(current)
+            else:
+                self._window_combo.setCurrentIndex(0)
             self._window_combo.blockSignals(False)
         except (ImportError, Exception):
             pass
 
     def _on_window_changed(self, title):
         """Save selected window title to current step."""
+        if title == "-- 请选择窗口 --":
+            title = ""
+        elif title == "-- 手动输入窗口标题 --":
+            text, ok = QInputDialog.getText(self, "手动输入窗口标题", "输入窗口标题（支持部分匹配）:")
+            self._window_combo.blockSignals(True)
+            self._window_combo.setCurrentIndex(0)
+            self._window_combo.blockSignals(False)
+            if ok and text:
+                # Add to list and select it
+                self._window_combo.addItem(text)
+                self._window_combo.setCurrentText(text)
+                title = text
+            else:
+                title = ""
         if self._current_step_idx >= 0:
             self._steps[self._current_step_idx].window_title = title
-        # Also store globally for the task
         self._selected_window = title
 
     def _minimize_before_action(self):
@@ -609,6 +645,7 @@ class MAAEditor(QWidget):
             self._step_list.setCurrentRow(len(self._steps) - 1)
             self._current_step_idx = len(self._steps) - 1
 
+        self._prepare_window()
         self._minimize_before_action()
         selector = ROISelector(self)
         selector.regionSelected.connect(lambda x, y, w, h: self._capture_template(x, y, w, h))
@@ -617,10 +654,31 @@ class MAAEditor(QWidget):
     def _select_roi_only(self):
         if self._current_step_idx < 0:
             return
+        self._prepare_window()
         self._minimize_before_action()
         selector = ROISelector(self)
         selector.regionSelected.connect(self._on_roi_only)
         selector.exec()
+
+    def _prepare_window(self):
+        """If window fix is enabled, move target window to fixed position."""
+        if not self._fix_win_cb.isChecked():
+            return
+        title = self._window_combo.currentText()
+        if not title or title.startswith("--"):
+            return
+        try:
+            import win32gui, win32con
+            rect = [self._win_x.value(), self._win_y.value(),
+                    self._win_w.value(), self._win_h.value()]
+            hwnd = win32gui.FindWindow(None, title)
+            if hwnd:
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOP,
+                                       rect[0], rect[1], rect[2], rect[3],
+                                       win32con.SWP_SHOWWINDOW)
+                import time; time.sleep(0.5)  # Let window settle
+        except Exception:
+            pass
 
     def _on_roi_only(self, x, y, w, h):
         if self._current_step_idx < 0:
@@ -636,6 +694,64 @@ class MAAEditor(QWidget):
         else:
             step.roi = [x, y, w, h]
             self._roi_lbl.setText(f"绝对[{x}, {y}] {w}x{h}  (窗口未找到)")
+
+    def _on_fix_win_toggled(self, checked: bool):
+        """Show/hide recorded rect info."""
+        self._fix_win_info.setVisible(checked)
+        if checked:
+            self._record_window_rect()
+
+    def _record_window_rect(self):
+        """Auto-record the current window position and size."""
+        title = self._window_combo.currentText()
+        if not title or title.startswith("--"):
+            self._fix_win_info.setText("⚠ 请先选择窗口")
+            return
+        try:
+            import win32gui
+            result = []
+            def find(hwnd, _):
+                if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd) == title:
+                    r = win32gui.GetWindowRect(hwnd)
+                    result.append(r)
+            win32gui.EnumWindows(find, None)
+            if result:
+                r = result[0]
+                self._fix_window_rect = [r[0], r[1], r[2] - r[0], r[3] - r[1]]
+                self._fix_win_info.setText(
+                    f"窗口状态: ({self._fix_window_rect[0]},{self._fix_window_rect[1]}) "
+                    f"{self._fix_window_rect[2]}×{self._fix_window_rect[3]}"
+                )
+            else:
+                self._fix_win_info.setText("⚠ 窗口未找到，截图时将自动记录")
+                self._fix_window_rect = None
+        except Exception:
+            self._fix_win_info.setText("⚠ 检测失败，截图时将自动记录")
+            self._fix_window_rect = None
+
+    def _prepare_window(self):
+        """If window fix is enabled, record rect on first use then restore."""
+        if not self._fix_win_cb.isChecked():
+            return
+        if not self._fix_window_rect:
+            # Auto-record current window state on first capture
+            self._record_window_rect()
+        if not self._fix_window_rect:
+            return
+        title = self._window_combo.currentText()
+        if not title or title.startswith("--"):
+            return
+        try:
+            import win32gui, win32con
+            r = self._fix_window_rect
+            hwnd = win32gui.FindWindow(None, title)
+            if hwnd:
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOP,
+                                       r[0], r[1], r[2], r[3],
+                                       win32con.SWP_SHOWWINDOW)
+                import time; time.sleep(0.5)
+        except Exception:
+            pass
 
     def _get_foreground_window_pos(self, title: str = ""):
         """Get the top-left position of a window by title (or foreground if no title given).
@@ -762,6 +878,10 @@ class MAAEditor(QWidget):
             },
             "root": root,
         }
+
+        # If window position fix is enabled, save the window rect
+        if self._fix_win_cb.isChecked() and getattr(self, '_fix_window_rect', None):
+            task_data["_meta"]["fix_window"] = self._fix_window_rect
 
         # Save to user data
         task_dir = data_dir(f"tasks/{now.strftime('%Y%m%d_%H%M%S')}")
