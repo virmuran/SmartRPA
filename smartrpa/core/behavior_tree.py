@@ -138,6 +138,16 @@ class BTNode:
             child = BTNode.from_dict(child_d) if child_d else None
             return RepeatNode(name, child, max_iter)
 
+        elif node_type == "for_each":
+            items = d.get("items")
+            range_def = d.get("range")
+            x_list = d.get("x_list")
+            y_list = d.get("y_list")
+            child_d = d.get("child")
+            child = BTNode.from_dict(child_d) if child_d else None
+            return ForEachNode(name, child, items=items, range_def=range_def,
+                              x_list=x_list, y_list=y_list)
+
         else:
             # Leaf: Action or Condition
             action = d.get("action", node_type)
@@ -363,6 +373,88 @@ class RepeatNode(BTNode):
         }
 
 
+class ForEachNode(BTNode):
+    """Iterate over items/range/grid, injecting loop variable $i into child nodes.
+
+    Supports:
+      items: [1, 2, 3]         → $i = each item
+      range: [0, 10, 2]        → $i = 0,2,4,6,8
+      x_list + y_list (grid)   → $x and $y for each grid cell
+    """
+
+    def __init__(self, name: str = "", child: BTNode = None,
+                 items: list = None, range_def: list = None,
+                 x_list: list = None, y_list: list = None):
+        super().__init__(name)
+        self.child = child
+        if child:
+            child.parent = self
+        self._items = items or []
+        self._range = range_def or []
+        self._x_list = x_list or []
+        self._y_list = y_list or []
+        self._index = 0
+        self._grid_index = 0  # for grid mode
+
+    def reset(self):
+        self._index = 0
+        self._grid_index = 0
+        if self.child:
+            self.child.reset()
+
+    def _get_iterable(self):
+        if self._x_list and self._y_list:
+            # Grid mode: flatten into (x, y) pairs
+            return [(x, y) for x in self._x_list for y in self._y_list]
+        elif self._range:
+            r = self._range
+            start = r[0] if len(r) > 0 else 0
+            end = r[1] if len(r) > 1 else start + 1
+            step = r[2] if len(r) > 2 else 1
+            return list(range(start, end, step))
+        elif self._items:
+            return self._items
+        return []
+
+    def tick(self, ctx: ActionContext) -> Status:
+        iterable = self._get_iterable()
+        if not iterable or self._index >= len(iterable):
+            return Status.SUCCESS
+
+        item = iterable[self._index]
+        if isinstance(item, tuple):
+            ctx.vars["$x"] = item[0]
+            ctx.vars["$y"] = item[1]
+            ctx.vars["$i"] = self._index
+        else:
+            ctx.vars["$i"] = item
+
+        status = self.child.tick(ctx)
+        if status == Status.FAILURE:
+            return Status.FAILURE
+        if status == Status.RUNNING:
+            return Status.RUNNING
+        # SUCCESS → next iteration
+        self._index += 1
+        if self.child:
+            self.child.reset()
+        if self._index >= len(iterable):
+            return Status.SUCCESS
+        return Status.RUNNING  # Continue in next tick
+
+    def to_dict(self) -> dict:
+        d = {"type": "for_each", "name": self.name,
+             "child": self.child.to_dict() if self.child else None}
+        if self._x_list and self._y_list:
+            d["x_list"] = self._x_list
+            d["y_list"] = self._y_list
+        elif self._range:
+            d["range"] = self._range
+        elif self._items:
+            d["items"] = self._items
+        return d
+
+
 class InverterNode(BTNode):
     """Flip child's result: SUCCESS -> FAILURE, FAILURE -> SUCCESS."""
 
@@ -490,9 +582,19 @@ class ActionNode(BTNode):
     @staticmethod
     def _execute(ctx: ActionContext, action: str, params: dict) -> bool:
         """Dispatch to the appropriate _do_xxx using the context."""
-        # Delegate to the engine's dispatch function
+        # Resolve $var references from context
+        resolved = {}
+        for k, v in params.items():
+            if isinstance(v, str) and v.startswith("$"):
+                var_name = v[1:]  # strip $
+                resolved[k] = ctx.vars.get(v, ctx.vars.get(var_name, v))
+            elif isinstance(k, str) and k.startswith("$"):
+                resolved[ctx.vars.get(k[1:], k)] = v
+            else:
+                resolved[k] = v
+
         if ActionNode.ACTION_DISPATCH:
-            return ActionNode.ACTION_DISPATCH(ctx, action, params)
+            return ActionNode.ACTION_DISPATCH(ctx, action, resolved)
 
         # Fallback inline dispatch
         ctrl = ctx.controller

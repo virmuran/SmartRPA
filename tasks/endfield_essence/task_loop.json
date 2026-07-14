@@ -1,0 +1,51 @@
+{
+  "_meta": {
+    "name": "终末地·基质扫描(循环版)",
+    "window": "Endfield",
+    "created": "2026-07-14T10:00:00",
+    "modified": "2026-07-14T10:00:00"
+  },
+  "root": {
+    "type": "sequence",
+    "name": "基质扫描主流程",
+    "children": [
+      {
+        "name": "等待进入背包界面",
+        "type": "wait_until",
+        "params": {
+          "template": "武器基质",
+          "roi": [38, 66, 105, 40],
+          "threshold": 0.85,
+          "timeout": 15
+        }
+      },
+      {
+        "name": "扫描5×9基质网格",
+        "type": "for_each",
+        "x_list": [128, 284, 439, 595, 751, 907, 1062, 1218, 1374],
+        "y_list": [196, 363, 530, 697, 819],
+        "child": {
+          "type": "sequence",
+          "name": "扫描单个基质",
+          "children": [
+            {
+              "name": "点击基质",
+              "type": "click",
+              "params": {
+                "x": "$x",
+                "y": "$y"
+              }
+            },
+            {
+              "name": "等待详情加载",
+              "type": "wait",
+              "params": {
+                "seconds": 0.8
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
