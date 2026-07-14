@@ -1,0 +1,75 @@
+{
+  "_meta": {
+    "name": "终末地·基质识别",
+    "window": "Endfield",
+    "fix_window": [0, 0, 1920, 1080],
+    "resolution": "1080p (1920×1080)",
+    "created": "2026-07-14T10:00:00",
+    "modified": "2026-07-14T10:00:00"
+  },
+  "root": {
+    "type": "sequence",
+    "name": "基质扫描主流程",
+    "children": [
+      {
+        "name": "确保背包界面打开",
+        "type": "wait_until",
+        "params": {
+          "template": "武器基质",
+          "roi": [38, 66, 105, 40],
+          "threshold": 0.85,
+          "timeout": 10
+        }
+      },
+      {
+        "name": "扫描第1个基质(列1行1)",
+        "type": "sequence",
+        "children": [
+          {
+            "name": "检测基质属性图标",
+            "type": "find",
+            "params": {
+              "template": "gat_passive_attr_atk",
+              "roi": [128, 196, 80, 80],
+              "threshold": 0.8
+            },
+            "desc": "检测atk属性图标"
+          },
+          {
+            "name": "打开基质详情",
+            "type": "click",
+            "params": {
+              "x": 128,
+              "y": 196
+            }
+          },
+          {
+            "name": "等待详情面板",
+            "type": "wait",
+            "params": {
+              "seconds": 1.0
+            }
+          },
+          {
+            "name": "检测锁定状态",
+            "type": "find",
+            "params": {
+              "template": "未锁定",
+              "roi": [1825, 270, 32, 32],
+              "threshold": 0.8
+            }
+          },
+          {
+            "name": "检测已弃用状态",
+            "type": "find",
+            "params": {
+              "template": "未弃用",
+              "roi": [1790, 270, 33, 32],
+              "threshold": 0.8
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
