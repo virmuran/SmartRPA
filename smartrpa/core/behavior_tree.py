@@ -1179,9 +1179,11 @@ class BTEngine:
             found = []
             win32gui.EnumWindows(find_win, None)
             if found:
-                rect = win32gui.GetWindowRect(found[0])
-                logger.info(f"Anchor: '{title}' -> ({rect[0]},{rect[1]})")
-                return (rect[0], rect[1])
+                # Use Client Area coordinates (excludes title bar/borders)
+                hwnd = found[0]
+                client_pos = win32gui.ClientToScreen(hwnd, (0, 0))
+                logger.info(f"Anchor: '{title}' -> client({client_pos[0]},{client_pos[1]})")
+                return (client_pos[0], client_pos[1])
             else:
                 logger.warning(f"Window not found: '{title}'")
         except ImportError:

@@ -181,6 +181,7 @@ class MAAEditor(QWidget):
         self._task_mgr = TaskManager()
         self._selected_window = ""
         self._fix_window_rect = None
+        self._resolution_preset = ""
 
         self._build()
 
@@ -326,6 +327,19 @@ class MAAEditor(QWidget):
         self._fix_win_info.setStyleSheet(f"font-size:11px;color:{T.TEXT3};padding-left:22px;")
         self._fix_win_info.setVisible(False)
         right_ly.addWidget(self._fix_win_info)
+
+        # Resolution preset
+        self._res_preset_row = QHBoxLayout()
+        self._res_preset_lbl = QLabel("分辨率预设:")
+        self._res_preset_lbl.setStyleSheet(f"font-size:12px;color:{T.TEXT2};padding-left:22px;")
+        self._res_preset_lbl.setVisible(False)
+        self._res_preset_row.addWidget(self._res_preset_lbl)
+        self._res_preset_combo = QComboBox()
+        self._res_preset_combo.addItems(["1080p (1920×1080)", "1440p (2560×1440)", "4K (3840×2160)"])
+        self._res_preset_combo.currentTextChanged.connect(self._on_resolution_changed)
+        self._res_preset_combo.setVisible(False)
+        self._res_preset_row.addWidget(self._res_preset_combo, 1)
+        right_ly.addLayout(self._res_preset_row)
 
         # Key / Text / Seconds fields (dynamic)
         self._param_row = QHBoxLayout()
@@ -696,10 +710,16 @@ class MAAEditor(QWidget):
             self._roi_lbl.setText(f"绝对[{x}, {y}] {w}x{h}  (窗口未找到)")
 
     def _on_fix_win_toggled(self, checked: bool):
-        """Show/hide recorded rect info."""
+        """Show/hide recorded rect info and resolution preset."""
         self._fix_win_info.setVisible(checked)
+        self._res_preset_lbl.setVisible(checked)
+        self._res_preset_combo.setVisible(checked)
         if checked:
             self._record_window_rect()
+
+    def _on_resolution_changed(self, text: str):
+        """Store the selected resolution preset."""
+        self._resolution_preset = text
 
     def _record_window_rect(self):
         """Auto-record the current window position and size."""
@@ -712,8 +732,11 @@ class MAAEditor(QWidget):
             result = []
             def find(hwnd, _):
                 if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd) == title:
-                    r = win32gui.GetWindowRect(hwnd)
-                    result.append(r)
+                    rect = win32gui.GetWindowRect(hwnd)
+                    # Use client area size (actual content region)
+                    cl = win32gui.GetClientRect(hwnd)
+                    client_w, client_h = cl[2], cl[3]
+                    result.append((rect[0], rect[1], client_w, client_h))
             win32gui.EnumWindows(find, None)
             if result:
                 r = result[0]
@@ -754,23 +777,22 @@ class MAAEditor(QWidget):
             pass
 
     def _get_foreground_window_pos(self, title: str = ""):
-        """Get the top-left position of a window by title (or foreground if no title given).
-        Returns (x, y) or (None, None)."""
+        """Get the Client Area top-left position of a window by title.
+        Returns (client_x, client_y) or (None, None)."""
         try:
             import win32gui
             if title:
                 result = []
                 def find_by_title(hwnd, _):
                     if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd) == title:
-                        rect = win32gui.GetWindowRect(hwnd)
-                        result.append((rect[0], rect[1]))
+                        client_pos = win32gui.ClientToScreen(hwnd, (0, 0))
+                        result.append((client_pos[0], client_pos[1]))
                 win32gui.EnumWindows(find_by_title, None)
                 if result:
                     return result[0]
-            # Fallback to foreground
             hwnd = win32gui.GetForegroundWindow()
-            rect = win32gui.GetWindowRect(hwnd)
-            return rect[0], rect[1]
+            client_pos = win32gui.ClientToScreen(hwnd, (0, 0))
+            return client_pos[0], client_pos[1]
         except (ImportError, Exception):
             return None, None
 
@@ -882,6 +904,8 @@ class MAAEditor(QWidget):
         # If window position fix is enabled, save the window rect
         if self._fix_win_cb.isChecked() and getattr(self, '_fix_window_rect', None):
             task_data["_meta"]["fix_window"] = self._fix_window_rect
+        if self._fix_win_cb.isChecked() and self._resolution_preset:
+            task_data["_meta"]["resolution"] = self._resolution_preset
 
         # Save to user data
         task_dir = data_dir(f"tasks/{now.strftime('%Y%m%d_%H%M%S')}")

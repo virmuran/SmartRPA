@@ -149,9 +149,10 @@ class TaskEngine:
                 found = []
                 win32gui.EnumWindows(find_win, None)
                 if found:
-                    rect = win32gui.GetWindowRect(found[0])
-                    logger.info(f"窗口锚定: '{self._window_title}' → ({rect[0]},{rect[1]})")
-                    return (rect[0], rect[1])
+                    hwnd = found[0]
+                    client_pos = win32gui.ClientToScreen(hwnd, (0, 0))
+                    logger.info(f"窗口锚定: '{self._window_title}' → client({client_pos[0]},{client_pos[1]})")
+                    return (client_pos[0], client_pos[1])
                 else:
                     logger.warning(f"未找到窗口: '{self._window_title}'")
             except ImportError:
